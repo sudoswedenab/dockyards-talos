@@ -16,7 +16,9 @@ import (
 )
 
 // +kubebuilder:rbac:groups=dockyards.io,resources=releases,verbs=get;list;watch
+// +kubebuilder:rbac:groups=dockyards.io,resources=releases/status,verbs=patch
 // +kubebuilder:rbac:groups=image.toolkit.fluxcd.io,resources=imagepolicies,verbs=create;get;list;patch;watch
+// +kubebuilder:rbac:groups=image.toolkit.fluxcd.io,resources=imagerepositories,verbs=create;get;list;patch;watch
 
 type DockyardsReleaseReconciler struct {
 	client.Client

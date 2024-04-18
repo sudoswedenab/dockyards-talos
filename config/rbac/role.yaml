@@ -13,9 +13,25 @@ rules:
   - list
   - watch
 - apiGroups:
+  - dockyards.io
+  resources:
+  - releases/status
+  verbs:
+  - patch
+- apiGroups:
   - image.toolkit.fluxcd.io
   resources:
   - imagepolicies
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - image.toolkit.fluxcd.io
+  resources:
+  - imagerepositories
   verbs:
   - create
   - get
