@@ -53,7 +53,7 @@ func (r *DockyardsReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	versions := []string{}
 
-	for _, version := range []string{"v1.29.x", "v1.28.x", "v1.27.x", "v1.26.x"} {
+	for _, version := range release.Spec.Ranges {
 		policyName := imageRepository.Name + "-" + version
 
 		imagePolicy := imagev1.ImagePolicy{
