@@ -31,6 +31,21 @@ func (r *DockyardsReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	switch release.Spec.Type {
+	case dockyardsv1.ReleaseTypeKubernetes:
+		return r.reconcileKubernetesReleases(ctx, &release)
+	case dockyardsv1.ReleaseTypeTalosInstaller:
+		return r.reconcileTalosInstaller(ctx, &release)
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *DockyardsReleaseReconciler) reconcileKubernetesReleases(ctx context.Context, release *dockyardsv1.Release) (ctrl.Result, error) {
+	logger := ctrl.LoggerFrom(ctx)
+
+	logger.Info("reconciling kubernetes releases")
+
 	imageRepository := imagev1.ImageRepository{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      release.Name,
@@ -38,7 +53,7 @@ func (r *DockyardsReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		},
 	}
 
-	_, err = controllerutil.CreateOrPatch(ctx, r.Client, &imageRepository, func() error {
+	_, err := controllerutil.CreateOrPatch(ctx, r.Client, &imageRepository, func() error {
 		imageRepository.Spec.Image = "ghcr.io/siderolabs/kubelet"
 
 		imageRepository.Spec.Interval = metav1.Duration{
@@ -98,7 +113,90 @@ func (r *DockyardsReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 		release.Status.Versions = versions
 
-		err := r.Status().Patch(ctx, &release, patch)
+		err := r.Status().Patch(ctx, release, patch)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context, release *dockyardsv1.Release) (ctrl.Result, error) {
+	logger := ctrl.LoggerFrom(ctx)
+
+	logger.Info("reconciling talos installer")
+
+	if len(release.Spec.Ranges) != 1 {
+		logger.Info("ignoring talos installer release without exactly one range", "count", len(release.Spec.Ranges))
+
+		return ctrl.Result{}, nil
+	}
+
+	imageRepository := imagev1.ImageRepository{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      release.Name,
+			Namespace: release.Namespace,
+		},
+	}
+
+	_, err := controllerutil.CreateOrPatch(ctx, r.Client, &imageRepository, func() error {
+		imageRepository.Spec.Image = "ghcr.io/siderolabs/installer"
+
+		imageRepository.Spec.Interval = metav1.Duration{
+			Duration: time.Hour,
+		}
+
+		return nil
+	})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	imagePolicy := imagev1.ImagePolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      imageRepository.Name,
+			Namespace: imageRepository.Namespace,
+		},
+	}
+
+	_, err = controllerutil.CreateOrPatch(ctx, r.Client, &imagePolicy, func() error {
+		imagePolicy.Spec.ImageRepositoryRef = meta.NamespacedObjectReference{
+			Name: imageRepository.Name,
+		}
+
+		imagePolicy.Spec.Policy = imagev1.ImagePolicyChoice{
+			SemVer: &imagev1.SemVerPolicy{
+				Range: release.Spec.Ranges[0],
+			},
+		}
+
+		return nil
+	})
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if imagePolicy.Status.LatestImage == "" {
+		logger.Info("ignoring talos installer image policy without latest image")
+
+		return ctrl.Result{}, nil
+	}
+
+	reference, err := name.ParseReference(imagePolicy.Status.LatestImage)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	tag := reference.Identifier()
+	versions := []string{tag}
+
+	if !slices.Equal(release.Status.Versions, versions) {
+		patch := client.MergeFrom(release.DeepCopy())
+
+		release.Status.Versions = versions
+
+		err := r.Status().Patch(ctx, release, patch)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
