@@ -10,9 +10,11 @@ import (
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/google/go-containerregistry/pkg/name"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
 
 // +kubebuilder:rbac:groups=dockyards.io,resources=releases,verbs=get;list;watch
@@ -88,6 +90,12 @@ func (r *DockyardsReleaseReconciler) reconcileKubernetesReleases(ctx context.Con
 					Range: version,
 				},
 			}
+
+			if imagePolicy.Labels == nil {
+				imagePolicy.Labels = make(map[string]string)
+			}
+
+			imagePolicy.Labels[dockyardsv1.LabelReleaseName] = release.Name
 
 			return nil
 		})
@@ -171,6 +179,12 @@ func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context
 			},
 		}
 
+		if imagePolicy.Labels == nil {
+			imagePolicy.Labels = make(map[string]string)
+		}
+
+		imagePolicy.Labels[dockyardsv1.LabelReleaseName] = release.Name
+
 		return nil
 	})
 	if err != nil {
@@ -205,13 +219,40 @@ func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context
 	return ctrl.Result{}, nil
 }
 
+func (r *DockyardsReleaseReconciler) ReleaseFromImagePolicy(ctx context.Context, o client.Object) []ctrl.Request {
+	imagePolicy, ok := o.(*imagev1.ImagePolicy)
+	if !ok {
+		return nil
+	}
+
+	releaseName, hasLabel := imagePolicy.Labels[dockyardsv1.LabelReleaseName]
+	if hasLabel {
+		return []ctrl.Request{
+			{
+				NamespacedName: types.NamespacedName{
+					Name:      releaseName,
+					Namespace: imagePolicy.Namespace,
+				},
+			},
+		}
+	}
+
+	return nil
+}
+
 func (r *DockyardsReleaseReconciler) SetupwithManager(m ctrl.Manager) error {
 	scheme := m.GetScheme()
 
 	_ = dockyardsv1.AddToScheme(scheme)
 	_ = imagev1.AddToScheme(scheme)
 
-	err := ctrl.NewControllerManagedBy(m).For(&dockyardsv1.Release{}).Complete(r)
+	err := ctrl.NewControllerManagedBy(m).
+		For(&dockyardsv1.Release{}).
+		Watches(
+			&imagev1.ImagePolicy{},
+			handler.EnqueueRequestsFromMapFunc(r.ReleaseFromImagePolicy),
+		).
+		Complete(r)
 	if err != nil {
 		return err
 	}
