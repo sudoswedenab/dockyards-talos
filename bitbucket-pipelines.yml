@@ -69,11 +69,16 @@ definitions:
       script:
       - source env.sh
       - flux push artifact "oci://${IMAGE}:${VERSION}-manifests" --path config --source "$BITBUCKET_GIT_HTTP_ORIGIN" --revision "$REVISION" --creds "AWS:$(cat ecr-login-password)"
+  - step: &test
+      name: test
+      script:
+      - go test ./... -v
 
 pipelines:
   default:
   - step: *default
   - step: *vendor
+  - step: *test
   - step: *build
   - step: *ecr-login
   - step: *push
@@ -82,6 +87,7 @@ pipelines:
     'v*':
     - step: *tag
     - step: *vendor
+    - step: *test
     - step: *build
     - step: *ecr-login
     - step: *push
