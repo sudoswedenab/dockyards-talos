@@ -1,3 +1,3 @@
 package main
 
-//go:generate controller-gen rbac:roleName=dockyards-talos paths="./..."
+//go:generate controller-gen rbac:roleName=dockyards-talos webhook paths="./..."

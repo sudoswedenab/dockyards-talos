@@ -18,6 +18,9 @@ spec:
       - image: dockyards-talos
         name: dockyards-talos
         imagePullPolicy: IfNotPresent
+        ports:
+        - name: webhook
+          containerPort: 9443
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

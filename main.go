@@ -7,6 +7,7 @@ import (
 	"os/signal"
 
 	"bitbucket.org/sudosweden/dockyards-talos/controllers"
+	"bitbucket.org/sudosweden/dockyards-talos/webhooks"
 	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -41,6 +42,13 @@ func main() {
 	}).SetupwithManager(m)
 	if err != nil {
 		slogr.Error(err, "error creating dockyards release reconciler")
+
+		os.Exit(1)
+	}
+
+	err = (&webhooks.DockyardsNodePool{}).SetupWebhookWithManager(m)
+	if err != nil {
+		slogr.Error(err, "error creating dockyards nodepool webhook")
 
 		os.Exit(1)
 	}
