@@ -42,7 +42,7 @@ func (webhook *DockyardsNodePool) ValidateDelete(ctx context.Context, obj runtim
 	return nil, nil
 }
 
-func (webhook *DockyardsNodePool) ValidateUpdate(ctx context.Context, newObj, oldObj runtime.Object) (admission.Warnings, error) {
+func (webhook *DockyardsNodePool) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
 	dockyardsNodePool, ok := newObj.(*dockyardsv1.NodePool)
 	if !ok {
 		return nil, nil
