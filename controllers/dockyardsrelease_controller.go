@@ -2,15 +2,17 @@ package controllers
 
 import (
 	"context"
-	"slices"
 	"time"
 
-	dockyardsv1 "bitbucket.org/sudosweden/dockyards-backend/pkg/api/v1alpha1"
+	dockyardsv1 "bitbucket.org/sudosweden/dockyards-backend/pkg/api/v1alpha2"
+	semverv3 "github.com/Masterminds/semver/v3"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
 	"github.com/fluxcd/pkg/apis/meta"
+	"github.com/fluxcd/pkg/runtime/patch"
 	"github.com/google/go-containerregistry/pkg/name"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -26,12 +28,25 @@ type DockyardsReleaseReconciler struct {
 	client.Client
 }
 
-func (r *DockyardsReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *DockyardsReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, reterr error) {
 	var release dockyardsv1.Release
 	err := r.Get(ctx, req.NamespacedName, &release)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	patchHelper, err := patch.NewHelper(&release, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	defer func() {
+		err := patchHelper.Patch(ctx, &release)
+		if err != nil {
+			result = ctrl.Result{}
+			reterr = kerrors.NewAggregate([]error{reterr, err})
+		}
+	}()
 
 	switch release.Spec.Type {
 	case dockyardsv1.ReleaseTypeKubernetes:
@@ -69,6 +84,7 @@ func (r *DockyardsReleaseReconciler) reconcileKubernetesReleases(ctx context.Con
 	}
 
 	versions := []string{}
+	var latestVersion *semverv3.Version
 
 	for _, version := range release.Spec.Ranges {
 		policyName := imageRepository.Name + "-" + version
@@ -114,18 +130,27 @@ func (r *DockyardsReleaseReconciler) reconcileKubernetesReleases(ctx context.Con
 
 		tag := reference.Identifier()
 		versions = append(versions, tag)
-	}
 
-	if !slices.Equal(release.Status.Versions, versions) {
-		patch := client.MergeFrom(release.DeepCopy())
-
-		release.Status.Versions = versions
-
-		err := r.Status().Patch(ctx, release, patch)
+		version, err := semverv3.NewVersion(tag)
 		if err != nil {
-			return ctrl.Result{}, err
+			logger.Error(err, "error parsing version as semver")
+
+			continue
+		}
+
+		if latestVersion == nil {
+			latestVersion = version
+
+			continue
+		}
+
+		if version.GreaterThan(latestVersion) {
+			latestVersion = version
 		}
 	}
+
+	release.Status.Versions = versions
+	release.Status.LatestVersion = latestVersion.String()
 
 	return ctrl.Result{}, nil
 }
@@ -203,18 +228,9 @@ func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context
 	}
 
 	tag := reference.Identifier()
-	versions := []string{tag}
 
-	if !slices.Equal(release.Status.Versions, versions) {
-		patch := client.MergeFrom(release.DeepCopy())
-
-		release.Status.Versions = versions
-
-		err := r.Status().Patch(ctx, release, patch)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-	}
+	release.Status.Versions = []string{tag}
+	release.Status.LatestVersion = tag
 
 	return ctrl.Result{}, nil
 }
