@@ -26,6 +26,10 @@ var (
 )
 
 func (webhook *DockyardsNodePool) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	scheme := mgr.GetScheme()
+
+	_ = dockyardsv1.AddToScheme(scheme)
+
 	return ctrl.NewWebhookManagedBy(mgr).For(&dockyardsv1.NodePool{}).WithValidator(webhook).Complete()
 }
 
