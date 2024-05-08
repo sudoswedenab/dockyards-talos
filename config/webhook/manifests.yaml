@@ -10,14 +10,14 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-dockyards-io-v1alpha1-nodepool
+      path: /validate-dockyards-io-v1alpha2-nodepool
   failurePolicy: Fail
   name: validation.nodepool.dockyards.io
   rules:
   - apiGroups:
     - dockyards.io
     apiVersions:
-    - v1alpha1
+    - v1alpha2
     operations:
     - CREATE
     - UPDATE
