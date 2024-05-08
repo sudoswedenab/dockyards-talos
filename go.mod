@@ -3,7 +3,7 @@ module bitbucket.org/sudosweden/dockyards-talos
 go 1.22.1
 
 require (
-	bitbucket.org/sudosweden/dockyards-backend/pkg/api v0.0.0-20240506154533-ebddb15ef424
+	bitbucket.org/sudosweden/dockyards-backend/pkg/api v0.0.0-20240507212401-b0bfb87a2f8c
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/fluxcd/image-reflector-controller/api v0.31.2
 	github.com/fluxcd/pkg/apis/meta v1.5.0
