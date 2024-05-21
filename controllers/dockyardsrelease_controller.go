@@ -150,7 +150,7 @@ func (r *DockyardsReleaseReconciler) reconcileKubernetesReleases(ctx context.Con
 	}
 
 	release.Status.Versions = versions
-	release.Status.LatestVersion = latestVersion.String()
+	release.Status.LatestVersion = latestVersion.Original()
 
 	return ctrl.Result{}, nil
 }
