@@ -1,4 +1,4 @@
-image: docker.io/library/golang:1.22.1
+image: docker.io/library/golang:1.22.6
 
 definitions:
   steps:
@@ -73,12 +73,20 @@ definitions:
       name: test
       script:
       - go test ./... -v
+  - step: &lint
+      name: lint
+      script:
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.60.1
+      - golangci-lint run
 
 pipelines:
   default:
   - step: *default
   - step: *vendor
-  - step: *test
+  - parallel:
+      steps:
+      - step: *test
+      - step: *lint
   - step: *build
   - step: *ecr-login
   - step: *push
@@ -87,7 +95,10 @@ pipelines:
     'v*':
     - step: *tag
     - step: *vendor
-    - step: *test
+    - parallel:
+        steps:
+        - step: *test
+        - step: *lint
     - step: *build
     - step: *ecr-login
     - step: *push
