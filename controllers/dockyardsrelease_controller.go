@@ -235,8 +235,8 @@ func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context
 	return ctrl.Result{}, nil
 }
 
-func (r *DockyardsReleaseReconciler) ReleaseFromImagePolicy(ctx context.Context, o client.Object) []ctrl.Request {
-	imagePolicy, ok := o.(*imagev1.ImagePolicy)
+func (r *DockyardsReleaseReconciler) ReleaseFromImagePolicy(_ context.Context, obj client.Object) []ctrl.Request {
+	imagePolicy, ok := obj.(*imagev1.ImagePolicy)
 	if !ok {
 		return nil
 	}
