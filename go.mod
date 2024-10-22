@@ -3,7 +3,7 @@ module bitbucket.org/sudosweden/dockyards-talos
 go 1.22.1
 
 require (
-	bitbucket.org/sudosweden/dockyards-backend/pkg/api v0.0.0-20240507212401-b0bfb87a2f8c
+	bitbucket.org/sudosweden/dockyards-backend/pkg/api v0.0.0-20241022105827-5e746875c10b
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/fluxcd/image-reflector-controller/api v0.31.2
 	github.com/fluxcd/pkg/apis/meta v1.5.0
@@ -74,7 +74,7 @@ require (
 	k8s.io/client-go v0.30.0 // indirect
 	k8s.io/klog/v2 v2.120.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20240411171206-dc4e619f62f3 // indirect
-	k8s.io/utils v0.0.0-20240310230437-4693a0247e57 // indirect
+	k8s.io/utils v0.0.0-20240921022957-49e7df575cb6 // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
