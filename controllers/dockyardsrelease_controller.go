@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"net/url"
+	"path"
 	"time"
 
 	dockyardsv1 "bitbucket.org/sudosweden/dockyards-backend/pkg/api/v1alpha3"
@@ -10,9 +12,11 @@ import (
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/patch"
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/siderolabs/talos/pkg/machinery/platforms"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -26,6 +30,8 @@ import (
 
 type DockyardsReleaseReconciler struct {
 	client.Client
+
+	ImageFactoryHost string
 }
 
 func (r *DockyardsReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, reterr error) {
@@ -231,6 +237,46 @@ func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context
 
 	release.Status.Versions = []string{tag}
 	release.Status.LatestVersion = tag
+
+	platformName, hasAnnotation := release.Annotations[AnnotationTalosPlatformName]
+	if !hasAnnotation {
+		release.Status.LatestURL = nil
+
+		return ctrl.Result{}, nil
+	}
+
+	schematicID, hasAnnotation := release.Annotations[AnnotationTalosSchematicID]
+	if !hasAnnotation {
+		schematicID = DefaultSchematicID
+	}
+
+	var platform *platforms.Platform
+
+	for _, cloudPlatform := range platforms.CloudPlatforms() {
+		if cloudPlatform.Name != platformName {
+			continue
+		}
+
+		platform = &cloudPlatform
+
+		break
+	}
+
+	if platform == nil {
+		logger.Info("invalid platform name", "platformName", platformName)
+
+		release.Status.LatestURL = nil
+
+		return ctrl.Result{}, nil
+	}
+
+	u := url.URL{
+		Scheme: "https",
+		Host:   r.ImageFactoryHost,
+		Path:   path.Join("image", schematicID, tag, platform.DiskImageDefaultPath(platforms.ArchAmd64)),
+	}
+
+	release.Status.LatestURL = ptr.To(u.String())
 
 	return ctrl.Result{}, nil
 }
