@@ -46,8 +46,6 @@ definitions:
   - step: &vendor
       name: vendor
       script:
-      - export GOPRIVATE=bitbucket.org/sudosweden
-      - git config --global url."ssh://git@bitbucket.org/".insteadOf "https://bitbucket.org/"
       - go mod vendor
       artifacts:
       - vendor/**
