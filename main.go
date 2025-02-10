@@ -9,12 +9,17 @@ import (
 	"bitbucket.org/sudosweden/dockyards-talos/controllers"
 	"bitbucket.org/sudosweden/dockyards-talos/webhooks"
 	"github.com/go-logr/logr"
+	"github.com/spf13/pflag"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 func main() {
+	var enableWebhooks bool
+	pflag.BoolVar(&enableWebhooks, "enable-webhooks", false, "enable webhooks")
+	pflag.Parse()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -46,11 +51,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = (&webhooks.DockyardsNodePool{}).SetupWebhookWithManager(m)
-	if err != nil {
-		slogr.Error(err, "error creating dockyards nodepool webhook")
+	if enableWebhooks {
+		err = (&webhooks.DockyardsNodePool{}).SetupWebhookWithManager(m)
+		if err != nil {
+			slogr.Error(err, "error creating dockyards nodepool webhook")
 
-		os.Exit(1)
+			os.Exit(1)
+		}
 	}
 
 	err = m.Start(ctx)
