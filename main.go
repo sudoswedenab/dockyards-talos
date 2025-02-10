@@ -17,7 +17,9 @@ import (
 
 func main() {
 	var enableWebhooks bool
+	var imageFactoryHost string
 	pflag.BoolVar(&enableWebhooks, "enable-webhooks", false, "enable webhooks")
+	pflag.StringVar(&imageFactoryHost, "image-factory-host", "factory.talos.dev", "image factory host")
 	pflag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -43,7 +45,8 @@ func main() {
 	}
 
 	err = (&controllers.DockyardsReleaseReconciler{
-		Client: m.GetClient(),
+		Client:           m.GetClient(),
+		ImageFactoryHost: imageFactoryHost,
 	}).SetupwithManager(m)
 	if err != nil {
 		slogr.Error(err, "error creating dockyards release reconciler")
