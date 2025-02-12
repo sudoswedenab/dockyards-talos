@@ -27,8 +27,6 @@ spec:
             drop:
             - ALL
           readOnlyRootFilesystem: true
-      imagePullSecrets:
-      - name: dockyards-registry
       serviceAccountName: dockyards-talos
       securityContext:
         fsGroup: 65532
