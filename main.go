@@ -13,13 +13,16 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 func main() {
 	var enableWebhooks bool
 	var imageFactoryHost string
+	var metricsBindAddress string
 	pflag.BoolVar(&enableWebhooks, "enable-webhooks", false, "enable webhooks")
 	pflag.StringVar(&imageFactoryHost, "image-factory-host", "factory.talos.dev", "image factory host")
+	pflag.StringVar(&metricsBindAddress, "metrics-bind-address", "0", "metrics bind address")
 	pflag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -37,7 +40,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	m, err := ctrl.NewManager(cfg, manager.Options{})
+	opts := manager.Options{
+		Metrics: server.Options{
+			BindAddress: metricsBindAddress,
+		},
+	}
+
+	m, err := ctrl.NewManager(cfg, opts)
 	if err != nil {
 		slogr.Error(err, "error creating manager")
 
