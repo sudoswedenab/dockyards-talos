@@ -6,7 +6,7 @@ definitions:
       name: default
       script:
       - echo "export VERSION=$(git branch --show-current)-$(git rev-parse --short HEAD)-$(date +%s)" >> env.sh
-      - echo "export IMAGE=075899289117.dkr.ecr.eu-north-1.amazonaws.com/dockyards-talos" >> env.sh
+      - echo "export IMAGE=public.ecr.aws/sudosweden/dockyards-talos" >> env.sh
       - echo "export REVISION=$(git branch --show-current)@$(git rev-parse --show-object-format):$(git rev-parse HEAD)" >> env.sh
       artifacts:
       - env.sh
@@ -14,7 +14,7 @@ definitions:
       name: tag
       script:
       - echo "export VERSION=$(git describe --exact-match)" >> env.sh
-      - echo "export IMAGE=075899289117.dkr.ecr.eu-north-1.amazonaws.com/dockyards-talos" >> env.sh
+      - echo "export IMAGE=public.ecr.aws/sudosweden/dockyards-talos" >> env.sh
       - echo "export REVISION=$(git branch --show-current)@$(git rev-parse --show-object-format):$(git rev-parse HEAD)" >> env.sh
       artifacts:
       - env.sh
@@ -37,7 +37,7 @@ definitions:
       name: push
       script:
       - source env.sh
-      - cat ecr-login-password | docker login --username AWS --password-stdin 075899289117.dkr.ecr.eu-north-1.amazonaws.com
+      - cat ecr-login-password | docker login --username AWS --password-stdin public.ecr.aws
       - docker load --input dockyards-talos.tar
       - docker tag dockyards-talos "${IMAGE}:${VERSION}"
       - docker push "${IMAGE}:${VERSION}"
@@ -55,10 +55,10 @@ definitions:
       oidc: true
       script:
       - echo $BITBUCKET_STEP_OIDC_TOKEN > /tmp/web-identity-token
-      - aws configure --profile bitbucket set region eu-north-1
-      - aws configure --profile bitbucket set role_arn arn:aws:iam::075899289117:role/BitbucketPipelinesDockyardsTalos
+      - aws configure --profile bitbucket set region us-east-1
+      - aws configure --profile bitbucket set role_arn arn:aws:iam::075899289117:role/BitbucketPipelinesDockyardsTalosPublic
       - aws configure --profile bitbucket set web_identity_token_file /tmp/web-identity-token
-      - aws ecr get-login-password --profile bitbucket > ecr-login-password
+      - aws ecr-public get-login-password --profile bitbucket > ecr-login-password
       artifacts:
       - ecr-login-password
   - step: &flux
