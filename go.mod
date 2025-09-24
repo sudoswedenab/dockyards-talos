@@ -1,6 +1,6 @@
 module github.com/sudoswedenab/dockyards-talos
 
-go 1.23.6
+go 1.25.1
 
 require (
 	github.com/Masterminds/semver/v3 v3.2.1
