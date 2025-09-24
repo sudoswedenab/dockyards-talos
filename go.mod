@@ -1,4 +1,4 @@
-module bitbucket.org/sudosweden/dockyards-talos
+module github.com/sudoswedenab/dockyards-talos
 
 go 1.23.6
 

@@ -6,10 +6,10 @@ import (
 	"os"
 	"os/signal"
 
-	"bitbucket.org/sudosweden/dockyards-talos/controllers"
-	"bitbucket.org/sudosweden/dockyards-talos/webhooks"
 	"github.com/go-logr/logr"
 	"github.com/spf13/pflag"
+	"github.com/sudoswedenab/dockyards-talos/controllers"
+	"github.com/sudoswedenab/dockyards-talos/webhooks"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
