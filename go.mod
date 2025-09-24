@@ -3,7 +3,6 @@ module bitbucket.org/sudosweden/dockyards-talos
 go 1.23.6
 
 require (
-	bitbucket.org/sudosweden/dockyards-backend/pkg/api v0.0.0-20250210124705-46af8f1a3d6e
 	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/fluxcd/image-reflector-controller/api v0.31.2
 	github.com/fluxcd/pkg/apis/meta v1.5.0
@@ -13,6 +12,7 @@ require (
 	github.com/google/go-containerregistry v0.19.1
 	github.com/siderolabs/talos/pkg/machinery v1.10.0-alpha.1.0.20250210090036-cd66fc6e8e7e
 	github.com/spf13/pflag v1.0.5
+	github.com/sudoswedenab/dockyards-backend/api v0.0.0-20250923160519-578199295f2f
 	k8s.io/api v0.30.0
 	k8s.io/apimachinery v0.30.0
 	k8s.io/utils v0.0.0-20240921022957-49e7df575cb6

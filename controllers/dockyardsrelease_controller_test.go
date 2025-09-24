@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	dockyardsv1 "bitbucket.org/sudosweden/dockyards-backend/pkg/api/v1alpha3"
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
 	"github.com/google/go-cmp/cmp"
+	dockyardsv1 "github.com/sudoswedenab/dockyards-backend/api/v1alpha3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	dockyardsv1 "bitbucket.org/sudosweden/dockyards-backend/pkg/api/v1alpha3"
 	"bitbucket.org/sudosweden/dockyards-talos/webhooks"
 	"github.com/google/go-cmp/cmp"
+	dockyardsv1 "github.com/sudoswedenab/dockyards-backend/api/v1alpha3"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
