@@ -170,3 +170,128 @@ func TestReleaseReconciler_TalosInstaller(t *testing.T) {
 		}
 	})
 }
+
+func TestReleaseReconciler_KubernetesInstaller(t *testing.T) {
+	scheme := runtime.NewScheme()
+
+	_ = dockyardsv1.AddToScheme(scheme)
+	_ = imagev1.AddToScheme(scheme)
+
+	ctx := context.Background()
+
+	t.Run("test empty image policy list", func(t *testing.T) {
+		release := dockyardsv1.Release{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test",
+				Namespace: "testing",
+			},
+			Spec: dockyardsv1.ReleaseSpec{
+				Ranges: []string{
+					"v1.34.x",
+					"v1.33.x",
+				},
+				Type: dockyardsv1.ReleaseTypeTalosInstaller,
+			},
+		}
+
+		imagePolicyList := imagev1.ImagePolicyList{
+			Items: []imagev1.ImagePolicy{},
+		}
+
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithLists(&imagePolicyList).
+			Build()
+
+		r := DockyardsReleaseReconciler{
+			Client:           c,
+			ImageFactoryHost: "localhost",
+		}
+
+		_, err := r.reconcileKubernetesReleases(ctx, &release)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		expected := dockyardsv1.Release{
+			ObjectMeta: release.ObjectMeta,
+			Spec:       release.Spec,
+			Status:     dockyardsv1.ReleaseStatus{},
+		}
+
+		if !cmp.Equal(release, expected) {
+			t.Errorf("diff: %s", cmp.Diff(expected, release))
+		}
+	})
+
+	t.Run("test latest version", func(t *testing.T) {
+		release := dockyardsv1.Release{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test",
+				Namespace: "testing",
+			},
+			Spec: dockyardsv1.ReleaseSpec{
+				Ranges: []string{
+					"v1.34.x",
+					"v1.33.x",
+				},
+				Type: dockyardsv1.ReleaseTypeTalosInstaller,
+			},
+		}
+
+		imagePolicyList := imagev1.ImagePolicyList{
+			Items: []imagev1.ImagePolicy{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-v1.34.x",
+						Namespace: "testing",
+					},
+					Status: imagev1.ImagePolicyStatus{
+						LatestImage: "testing/kubernetes:v1.34.1",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-v1.33.x",
+						Namespace: "testing",
+					},
+					Status: imagev1.ImagePolicyStatus{
+						LatestImage: "testing/kubernetes:v1.33.9",
+					},
+				},
+			},
+		}
+
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithLists(&imagePolicyList).
+			Build()
+
+		r := DockyardsReleaseReconciler{
+			Client:           c,
+			ImageFactoryHost: "localhost",
+		}
+
+		_, err := r.reconcileKubernetesReleases(ctx, &release)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		expected := dockyardsv1.Release{
+			ObjectMeta: release.ObjectMeta,
+			Spec:       release.Spec,
+			Status: dockyardsv1.ReleaseStatus{
+				LatestVersion: "v1.34.1",
+				Versions: []string{
+					"v1.34.1",
+					"v1.33.9",
+				},
+			},
+		}
+
+		if !cmp.Equal(release, expected) {
+			t.Errorf("diff: %s", cmp.Diff(expected, release))
+		}
+	})
+
+}
