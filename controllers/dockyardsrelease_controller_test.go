@@ -58,7 +58,10 @@ func TestReleaseReconciler_TalosInstaller(t *testing.T) {
 				},
 			},
 			Status: imagev1.ImagePolicyStatus{
-				LatestImage: "ghcr.io/siderolabs/installer:v1.9.3",
+				LatestRef: &imagev1.ImageRef{
+					Name: "ghcr.io/siderolabs/installer",
+					Tag:  "v1.9.3",
+				},
 			},
 		}
 
@@ -129,7 +132,10 @@ func TestReleaseReconciler_TalosInstaller(t *testing.T) {
 				},
 			},
 			Status: imagev1.ImagePolicyStatus{
-				LatestImage: "ghcr.io/siderolabs/installer:v1.8.9",
+				LatestRef: &imagev1.ImageRef{
+					Name: "ghcr.io/siderolabs/installer",
+					Tag:  "v1.8.9",
+				},
 			},
 		}
 
@@ -247,7 +253,10 @@ func TestReleaseReconciler_KubernetesInstaller(t *testing.T) {
 						Namespace: "testing",
 					},
 					Status: imagev1.ImagePolicyStatus{
-						LatestImage: "testing/kubernetes:v1.34.1",
+						LatestRef: &imagev1.ImageRef{
+							Name: "testing/kubernetes",
+							Tag:  "v1.34.1",
+						},
 					},
 				},
 				{
@@ -256,7 +265,10 @@ func TestReleaseReconciler_KubernetesInstaller(t *testing.T) {
 						Namespace: "testing",
 					},
 					Status: imagev1.ImagePolicyStatus{
-						LatestImage: "testing/kubernetes:v1.33.9",
+						LatestRef: &imagev1.ImageRef{
+							Name: "testing/kubernetes",
+							Tag:  "v1.33.9",
+						},
 					},
 				},
 			},

@@ -24,7 +24,6 @@ import (
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/patch"
-	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/siderolabs/talos/pkg/machinery/platforms"
 	dockyardsv1 "github.com/sudoswedenab/dockyards-backend/api/v1alpha3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -139,16 +138,11 @@ func (r *DockyardsReleaseReconciler) reconcileKubernetesReleases(ctx context.Con
 			return ctrl.Result{}, err
 		}
 
-		if imagePolicy.Status.LatestImage == "" {
+		if imagePolicy.Status.LatestRef == nil {
 			continue
 		}
 
-		reference, err := name.ParseReference(imagePolicy.Status.LatestImage)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
-
-		tag := reference.Identifier()
+		tag := imagePolicy.Status.LatestRef.Tag
 		versions = append(versions, tag)
 
 		version, err := semverv3.NewVersion(tag)
@@ -238,18 +232,13 @@ func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context
 		return ctrl.Result{}, err
 	}
 
-	if imagePolicy.Status.LatestImage == "" {
-		logger.Info("ignoring talos installer image policy without latest image")
+	if imagePolicy.Status.LatestRef == nil {
+		logger.Info("ignoring talos installer image policy without latest reference")
 
 		return ctrl.Result{}, nil
 	}
 
-	reference, err := name.ParseReference(imagePolicy.Status.LatestImage)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	tag := reference.Identifier()
+	tag := imagePolicy.Status.LatestRef.Tag
 
 	release.Status.Versions = []string{tag}
 	release.Status.LatestVersion = tag
