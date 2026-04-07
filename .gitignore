@@ -1,2 +1,3 @@
 /dockyards-talos
 /config/kustomization.yaml
+/discovery_state.json
