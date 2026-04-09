@@ -12,30 +12,47 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+version: "2"
 run:
-  timeout: 5m
   tests: false
 linters:
   enable:
-  - goconst
-  - govet
-  - importas
-  - nestif
-  - nlreturn
-  - reassign
-  - revive
-  - usestdlibvars
-  - whitespace
-linters-settings:
-  importas:
-    no-unaliased: true
-    alias:
-    - pkg: k8s.io/api/core/v1
-      alias: corev1
-    - pkg: k8s.io/apimachinery/pkg/apis/meta/v1
-      alias: metav1
-    - pkg: bitbucket.org/sudosweden/dockyards-backend/pkg/api/v1alpha3
-      alias: dockyardsv1
+    - goconst
+    - importas
+    - nestif
+    - nlreturn
+    - reassign
+    - revive
+    - usestdlibvars
+    - whitespace
+  settings:
+    importas:
+      alias:
+        - pkg: k8s.io/api/core/v1
+          alias: corev1
+        - pkg: k8s.io/apimachinery/pkg/apis/meta/v1
+          alias: metav1
+        - pkg: bitbucket.org/sudosweden/dockyards-backend/pkg/api/v1alpha3
+          alias: dockyardsv1
+      no-unaliased: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
