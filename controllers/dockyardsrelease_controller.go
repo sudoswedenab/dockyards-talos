@@ -95,7 +95,6 @@ func (r *DockyardsReleaseReconciler) reconcileKubernetesReleases(ctx context.Con
 		imageRepository.Spec.Interval = metav1.Duration{
 			Duration: time.Hour,
 		}
-
 		return nil
 	})
 	if err != nil {
