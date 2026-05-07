@@ -181,6 +181,7 @@ func (s *ClusterDiscoveryServer) garbageCollectionLoop() {
 			}
 		case <-ticker.C:
 			s.collectGarbage()
+			s.broadcastCurrentState()
 		}
 	}
 }
@@ -594,6 +595,35 @@ func (s *ClusterDiscoveryServer) collectGarbage() {
 		if s.Logger != nil {
 			s.Logger.Debug("cleaned up watchers", "before", before, "after", len(newWatchers))
 		}
+	})
+}
+
+func (s *ClusterDiscoveryServer) broadcastCurrentState() {
+	var affiliates []ClusterAffiliate
+
+	s.ClusterAffiliates.With(func(ca *map[ClusterAffiliateID]ClusterAffiliate) {
+		clusterAffiliates := *ca
+		if clusterAffiliates == nil {
+			return
+		}
+
+		affiliates = make([]ClusterAffiliate, 0, len(clusterAffiliates))
+		for _, affiliate := range clusterAffiliates {
+			if affiliate.Affiliate == nil {
+				continue
+			}
+
+			affiliates = append(affiliates, affiliate)
+		}
+	})
+
+	if len(affiliates) == 0 {
+		return
+	}
+
+	s.broadcast(WatchResponse{
+		ClusterAffiliates: affiliates,
+		Deleted:           false,
 	})
 }
 
