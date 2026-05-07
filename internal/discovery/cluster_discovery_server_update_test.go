@@ -82,3 +82,40 @@ func TestAffiliateUpdateBroadcastsForExistingAffiliate(t *testing.T) {
 		t.Fatalf("timed out waiting for update broadcast")
 	}
 }
+
+func TestBroadcastCurrentStateBroadcastsAllAffiliates(t *testing.T) {
+	ch := make(chan WatchResponse, 1)
+
+	server := ClusterDiscoveryServer{
+		watchers: sync.NewMutexProtected([]weak.Pointer[chan WatchResponse]{
+			weak.Make(&ch),
+		}),
+		ClusterAffiliates: sync.NewMutexProtected(map[ClusterAffiliateID]ClusterAffiliate{
+			{ClusterID: ClusterID("some-cluster"), AffiliateID: AffiliateID("a1")}: {
+				ClusterID: ClusterID("some-cluster"),
+				Affiliate: &discoveryv1.Affiliate{Id: "a1"},
+				RemoveAfter: time.Now().Add(10 * time.Minute),
+			},
+			{ClusterID: ClusterID("some-cluster"), AffiliateID: AffiliateID("a2")}: {
+				ClusterID: ClusterID("some-cluster"),
+				Affiliate: &discoveryv1.Affiliate{Id: "a2"},
+				RemoveAfter: time.Now().Add(10 * time.Minute),
+			},
+		}),
+	}
+
+	server.broadcastCurrentState()
+
+	select {
+	case msg := <-ch:
+		if msg.Deleted {
+			t.Fatalf("expected non-deleted update")
+		}
+
+		if len(msg.ClusterAffiliates) != 2 {
+			t.Fatalf("expected 2 affiliates in broadcast, got %d", len(msg.ClusterAffiliates))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for periodic state broadcast")
+	}
+}
