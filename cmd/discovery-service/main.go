@@ -26,6 +26,7 @@ import (
 	"github.com/sudoswedenab/dockyards-talos/internal/discovery"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 )
 
 func main() {
@@ -51,6 +52,14 @@ func main() {
 
 	discoveryTLSKeyPath := "/tmp/dockyards-talos/serving-certs/discovery-service/ca.key"
 	pflag.StringVar(&discoveryTLSKeyPath, "tls-key-path", discoveryTLSKeyPath, "path to TLS key to use for cluster discovery server")
+
+	// gRPC-go defaults will send GOAWAY ENHANCE_YOUR_CALM if clients keepalive-ping more
+	// frequently than the server allows (default MinTime is very high). Talos clients may use
+	// more aggressive keepalive to survive NAT/idle timeouts.
+	grpcKeepaliveMinTime := 30 * time.Second
+	pflag.DurationVar(&grpcKeepaliveMinTime, "grpc-keepalive-min-time", grpcKeepaliveMinTime, "minimum time between client keepalive pings before the server sends GOAWAY (ENHANCE_YOUR_CALM)")
+	grpcKeepalivePermitWithoutStream := true
+	pflag.BoolVar(&grpcKeepalivePermitWithoutStream, "grpc-keepalive-permit-without-stream", grpcKeepalivePermitWithoutStream, "allow client keepalive pings when there are no active RPC streams")
 
 	pflag.Parse()
 
@@ -105,6 +114,10 @@ func main() {
 	)
 
 	var grpcOpts []grpc.ServerOption
+	grpcOpts = append(grpcOpts, grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+		MinTime:             grpcKeepaliveMinTime,
+		PermitWithoutStream: grpcKeepalivePermitWithoutStream,
+	}))
 	if discoveryUseTLS {
 		cert, err := credentials.NewServerTLSFromFile(discoveryTLSCertPath, discoveryTLSKeyPath)
 		if err != nil {
