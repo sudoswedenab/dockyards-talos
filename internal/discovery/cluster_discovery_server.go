@@ -333,10 +333,6 @@ func (s *ClusterDiscoveryServer) AffiliateUpdate(ctx context.Context, req *disco
 				"endpoints", len(aff.Affiliate.GetEndpoints()),
 			)
 		}
-		s.broadcast(WatchResponse{
-			ClusterAffiliates: []ClusterAffiliate{aff},
-			Deleted:           false,
-		})
 	} else if s.Logger != nil {
 		s.Logger.Debug("affiliate updated",
 			"clusterID", clusterID,
@@ -345,6 +341,11 @@ func (s *ClusterDiscoveryServer) AffiliateUpdate(ctx context.Context, req *disco
 			"endpoints", len(aff.Affiliate.GetEndpoints()),
 		)
 	}
+
+	s.broadcast(WatchResponse{
+		ClusterAffiliates: []ClusterAffiliate{aff},
+		Deleted:           false,
+	})
 
 	return nil, nil
 }
