@@ -32,7 +32,9 @@ func (p *JSONFileStateProvider) Load() []ClusterAffiliate {
 	if os.IsNotExist(err) {
 		err := os.WriteFile(p.Path, []byte("[]"), 0o666)
 		if err != nil {
-			p.Logger.Error("could not create initial json file", "err", err, "path", p.Path)
+			if p.Logger != nil {
+				p.Logger.Error("could not create initial json file", "err", err, "path", p.Path)
+			}
 		}
 
 		return nil

@@ -17,6 +17,8 @@ package discovery
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net"
 	"slices"
 	"time"
@@ -29,9 +31,11 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
-type ClientID string
-type AffiliateID string
-type ClusterID string
+type (
+	ClientID    string
+	AffiliateID string
+	ClusterID   string
+)
 
 type ClusterAffiliateID struct {
 	ClusterID   ClusterID
@@ -52,6 +56,8 @@ type WatchResponse struct {
 type ClusterDiscoveryServer struct {
 	discoveryv1.UnimplementedClusterServer
 
+	Logger *slog.Logger
+
 	garbageCollectionInterval time.Duration
 	killGarbageCollector      chan struct{}
 
@@ -62,17 +68,25 @@ type ClusterDiscoveryServer struct {
 var _ discoveryv1.ClusterServer = &ClusterDiscoveryServer{}
 
 type ClusterDiscoveryServerOptions struct {
+	Logger                    *slog.Logger
 	StateProvider             StateProvider
 	GarbageCollectionInterval time.Duration
 }
 
 type ClusterDiscoveryServerOption func(options *ClusterDiscoveryServerOptions)
 
+func ClusterDiscoveryServerLogger(logger *slog.Logger) ClusterDiscoveryServerOption {
+	return func(options *ClusterDiscoveryServerOptions) {
+		options.Logger = logger
+	}
+}
+
 func ClusterDiscoveryServerStateProvider(state StateProvider) ClusterDiscoveryServerOption {
 	return func(options *ClusterDiscoveryServerOptions) {
 		options.StateProvider = state
 	}
 }
+
 func ClusterDiscoveryServerGarbageCollectionInterval(interval time.Duration) ClusterDiscoveryServerOption {
 	return func(options *ClusterDiscoveryServerOptions) {
 		options.GarbageCollectionInterval = interval
@@ -114,11 +128,19 @@ func NewClusterDiscoveryServer(options ...ClusterDiscoveryServerOption) *Cluster
 	}
 
 	result := &ClusterDiscoveryServer{
+		Logger: opts.Logger,
+
 		garbageCollectionInterval: opts.GarbageCollectionInterval,
 		killGarbageCollector:      make(chan struct{}),
 
 		watchers:          sync.NewMutexProtected(watchers),
 		ClusterAffiliates: sync.NewMutexProtected(state),
+	}
+	if result.Logger != nil {
+		result.Logger.Debug("cluster discovery server created",
+			"initialAffiliates", len(state),
+			"gcInterval", result.garbageCollectionInterval,
+		)
 	}
 	go result.garbageCollectionLoop()
 
@@ -126,6 +148,9 @@ func NewClusterDiscoveryServer(options ...ClusterDiscoveryServerOption) *Cluster
 }
 
 func (s *ClusterDiscoveryServer) Close() {
+	if s.Logger != nil {
+		s.Logger.Debug("cluster discovery server closing")
+	}
 	close(s.killGarbageCollector)
 	s.watchers.With(func(value *[]weak.Pointer[chan WatchResponse]) {
 		for _, watcher := range *value {
@@ -143,6 +168,9 @@ func (s *ClusterDiscoveryServer) garbageCollectionLoop() {
 	if interval.Nanoseconds() == 0 {
 		interval = 15 * time.Minute
 	}
+	if s.Logger != nil {
+		s.Logger.Debug("starting garbage collection loop", "interval", interval)
+	}
 
 	ticker := time.NewTicker(interval)
 	for {
@@ -159,6 +187,9 @@ func (s *ClusterDiscoveryServer) garbageCollectionLoop() {
 
 func (s *ClusterDiscoveryServer) Hello(ctx context.Context, req *discoveryv1.HelloRequest) (*discoveryv1.HelloResponse, error) {
 	_ = req
+	if s.Logger != nil {
+		s.Logger.Debug("hello request")
+	}
 
 	p, ok := peer.FromContext(ctx)
 	if !ok {
@@ -173,9 +204,44 @@ func (s *ClusterDiscoveryServer) Hello(ctx context.Context, req *discoveryv1.Hel
 		return nil, errors.New("could not get client IP")
 	}
 
-	clientIP := net.ParseIP(addr.String())
+	if s.Logger != nil {
+		s.Logger.Debug("hello peer addr",
+			"addr", addr.String(),
+			"network", addr.Network(),
+			"type", fmt.Sprintf("%T", addr),
+		)
+	}
+
+	var clientIP net.IP
+	switch a := addr.(type) {
+	case *net.TCPAddr:
+		clientIP = a.IP
+	case *net.UDPAddr:
+		clientIP = a.IP
+	case *net.IPAddr:
+		clientIP = a.IP
+	default:
+		// Often formatted as "ip:port"; handle both that and bare IP.
+		if host, _, err := net.SplitHostPort(addr.String()); err == nil {
+			clientIP = net.ParseIP(host)
+		} else {
+			clientIP = net.ParseIP(addr.String())
+		}
+	}
 	if clientIP == nil {
+		if s.Logger != nil {
+			s.Logger.Debug("could not parse client IP",
+				"addr", addr.String(),
+				"network", addr.Network(),
+				"type", fmt.Sprintf("%T", addr),
+			)
+		}
+
 		return nil, errors.New("could not parse client IP")
+	}
+
+	if s.Logger != nil {
+		s.Logger.Debug("hello response", "clientIP", clientIP.String())
 	}
 
 	return &discoveryv1.HelloResponse{
@@ -185,7 +251,20 @@ func (s *ClusterDiscoveryServer) Hello(ctx context.Context, req *discoveryv1.Hel
 }
 
 func (s *ClusterDiscoveryServer) AffiliateUpdate(ctx context.Context, req *discoveryv1.AffiliateUpdateRequest) (*discoveryv1.AffiliateUpdateResponse, error) {
-	_ = ctx
+	if s.Logger != nil {
+		if p, ok := peer.FromContext(ctx); ok && p != nil {
+			s.Logger.Debug("affiliate update request",
+				"clusterID", req.GetClusterId(),
+				"affiliateID", req.GetAffiliateId(),
+				"peer", p.Addr,
+			)
+		} else {
+			s.Logger.Debug("affiliate update request",
+				"clusterID", req.GetClusterId(),
+				"affiliateID", req.GetAffiliateId(),
+			)
+		}
+	}
 
 	s.collectGarbage()
 
@@ -246,17 +325,45 @@ func (s *ClusterDiscoveryServer) AffiliateUpdate(ctx context.Context, req *disco
 	})
 
 	if createdNow {
+		if s.Logger != nil {
+			s.Logger.Debug("affiliate created",
+				"clusterID", clusterID,
+				"affiliateID", affiliateID,
+				"removeAfter", aff.RemoveAfter,
+				"endpoints", len(aff.Affiliate.GetEndpoints()),
+			)
+		}
 		s.broadcast(WatchResponse{
 			ClusterAffiliates: []ClusterAffiliate{aff},
 			Deleted:           false,
 		})
+	} else if s.Logger != nil {
+		s.Logger.Debug("affiliate updated",
+			"clusterID", clusterID,
+			"affiliateID", affiliateID,
+			"removeAfter", aff.RemoveAfter,
+			"endpoints", len(aff.Affiliate.GetEndpoints()),
+		)
 	}
 
 	return nil, nil
 }
 
 func (s *ClusterDiscoveryServer) AffiliateDelete(ctx context.Context, req *discoveryv1.AffiliateDeleteRequest) (*discoveryv1.AffiliateDeleteResponse, error) {
-	_ = ctx
+	if s.Logger != nil {
+		if p, ok := peer.FromContext(ctx); ok && p != nil {
+			s.Logger.Debug("affiliate delete request",
+				"clusterID", req.GetClusterId(),
+				"affiliateID", req.GetAffiliateId(),
+				"peer", p.Addr,
+			)
+		} else {
+			s.Logger.Debug("affiliate delete request",
+				"clusterID", req.GetClusterId(),
+				"affiliateID", req.GetAffiliateId(),
+			)
+		}
+	}
 
 	s.collectGarbage()
 
@@ -283,7 +390,14 @@ func (s *ClusterDiscoveryServer) AffiliateDelete(ctx context.Context, req *disco
 		*a = affiliates
 	})
 	if !affiliateFound {
+		if s.Logger != nil {
+			s.Logger.Debug("affiliate delete: not found", "clusterID", clusterID, "affiliateID", affiliateID)
+		}
+
 		return nil, nil
+	}
+	if s.Logger != nil {
+		s.Logger.Debug("affiliate deleted", "clusterID", clusterID, "affiliateID", affiliateID)
 	}
 
 	s.broadcast(WatchResponse{
@@ -295,7 +409,13 @@ func (s *ClusterDiscoveryServer) AffiliateDelete(ctx context.Context, req *disco
 }
 
 func (s *ClusterDiscoveryServer) List(ctx context.Context, req *discoveryv1.ListRequest) (*discoveryv1.ListResponse, error) {
-	_ = ctx
+	if s.Logger != nil {
+		if p, ok := peer.FromContext(ctx); ok && p != nil {
+			s.Logger.Debug("list request", "clusterID", req.GetClusterId(), "peer", p.Addr)
+		} else {
+			s.Logger.Debug("list request", "clusterID", req.GetClusterId())
+		}
+	}
 
 	s.collectGarbage()
 
@@ -332,13 +452,21 @@ func (s *ClusterDiscoveryServer) List(ctx context.Context, req *discoveryv1.List
 		}
 	})
 
-	return &discoveryv1.ListResponse{
+	resp := &discoveryv1.ListResponse{
 		Affiliates: affiliates,
-	}, nil
+	}
+	if s.Logger != nil {
+		s.Logger.Debug("list response", "clusterID", req.GetClusterId(), "affiliates", len(resp.GetAffiliates()))
+	}
+
+	return resp, nil
 }
 
 func (s *ClusterDiscoveryServer) Watch(req *discoveryv1.WatchRequest, res grpc.ServerStreamingServer[discoveryv1.WatchResponse]) error {
 	ch := make(chan WatchResponse, 1024)
+	if s.Logger != nil {
+		s.Logger.Debug("watch started", "clusterID", req.GetClusterId())
+	}
 
 	s.watchers.With(func(watchers *[]weak.Pointer[chan WatchResponse]) {
 		*watchers = append(*watchers, weak.Make(&ch))
@@ -346,39 +474,61 @@ func (s *ClusterDiscoveryServer) Watch(req *discoveryv1.WatchRequest, res grpc.S
 
 	s.collectGarbage()
 
-	for msg := range ch {
-		count := clusterAffiliateCount(msg.ClusterAffiliates, ClusterID(req.ClusterId))
-		if count == 0 {
-			continue
-		}
-		affiliates := make([]*discoveryv1.Affiliate, count)[:0]
-		for _, clusterAffiliate := range msg.ClusterAffiliates {
-			if clusterAffiliate.ClusterID != ClusterID(req.GetClusterId()) {
-				continue
+	for {
+		select {
+		case <-res.Context().Done():
+			if s.Logger != nil {
+				s.Logger.Debug("watch ended", "clusterID", req.GetClusterId(), "err", res.Context().Err())
 			}
-			if clusterAffiliate.Affiliate == nil {
-				continue
-			}
-			affiliates = append(affiliates, clusterAffiliate.Affiliate)
-		}
 
-		if msg.Deleted {
-			// If deleted, we only provide the IDs
-			affiliates = stripAffiliateContent(affiliates)
-		}
-		err := res.Send(&discoveryv1.WatchResponse{
-			Affiliates: affiliates,
-			Deleted:    msg.Deleted,
-		})
-		if err != nil {
-			return err
+			return res.Context().Err()
+		case msg, ok := <-ch:
+			if !ok {
+				if s.Logger != nil {
+					s.Logger.Debug("watch channel closed", "clusterID", req.GetClusterId())
+				}
+
+				return nil
+			}
+
+			count := clusterAffiliateCount(msg.ClusterAffiliates, ClusterID(req.ClusterId))
+			if count == 0 {
+				continue
+			}
+			affiliates := make([]*discoveryv1.Affiliate, count)[:0]
+			for _, clusterAffiliate := range msg.ClusterAffiliates {
+				if clusterAffiliate.ClusterID != ClusterID(req.GetClusterId()) {
+					continue
+				}
+				if clusterAffiliate.Affiliate == nil {
+					continue
+				}
+				affiliates = append(affiliates, clusterAffiliate.Affiliate)
+			}
+
+			if msg.Deleted {
+				// If deleted, we only provide the IDs
+				affiliates = stripAffiliateContent(affiliates)
+			}
+			err := res.Send(&discoveryv1.WatchResponse{
+				Affiliates: affiliates,
+				Deleted:    msg.Deleted,
+			})
+			if err != nil {
+				if s.Logger != nil {
+					s.Logger.Debug("watch send failed", "clusterID", req.GetClusterId(), "err", err)
+				}
+
+				return err
+			}
 		}
 	}
-
-	return nil
 }
 
 func (s *ClusterDiscoveryServer) broadcast(message WatchResponse) {
+	if s.Logger != nil {
+		s.Logger.Debug("broadcasting update", "affiliates", len(message.ClusterAffiliates), "deleted", message.Deleted)
+	}
 	s.watchers.With(func(watchers *[]weak.Pointer[chan WatchResponse]) {
 		for _, watcher := range *watchers {
 			w := watcher.Value()
@@ -417,6 +567,9 @@ func (s *ClusterDiscoveryServer) collectGarbage() {
 	})
 
 	if len(deleted) != 0 {
+		if s.Logger != nil {
+			s.Logger.Debug("garbage collected affiliates", "count", len(deleted))
+		}
 		s.broadcast(WatchResponse{
 			ClusterAffiliates: deleted,
 			Deleted:           true,
@@ -424,6 +577,7 @@ func (s *ClusterDiscoveryServer) collectGarbage() {
 	}
 
 	s.watchers.With(func(watchers *[]weak.Pointer[chan WatchResponse]) {
+		before := len(*watchers)
 		newWatchers := make([]weak.Pointer[chan WatchResponse], len(*watchers))[:0]
 		for _, watcher := range *watchers {
 			if watcher.Value() == nil {
@@ -432,10 +586,13 @@ func (s *ClusterDiscoveryServer) collectGarbage() {
 			newWatchers = append(newWatchers, watcher)
 		}
 
-		if len(*watchers) == len(newWatchers) {
+		if before == len(newWatchers) {
 			return // The array did not change
 		}
 		*watchers = newWatchers
+		if s.Logger != nil {
+			s.Logger.Debug("cleaned up watchers", "before", before, "after", len(newWatchers))
+		}
 	})
 }
 
