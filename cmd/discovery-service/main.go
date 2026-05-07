@@ -99,6 +99,7 @@ func main() {
 	})
 
 	clusterDiscoveryServer := discovery.NewClusterDiscoveryServer(
+		discovery.ClusterDiscoveryServerLogger(logger),
 		discovery.ClusterDiscoveryServerStateProvider(provider),
 		discovery.ClusterDiscoveryServerGarbageCollectionInterval(discoveryGCInterval),
 	)
