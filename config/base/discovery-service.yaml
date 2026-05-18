@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-- deployment.yaml
-- discovery-service.yaml
-- serviceaccount.yaml
-- clusterrolebinding.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dockyards-talos-discovery
+spec:
+  ports:
+  - port: 6000
+    targetPort: discovery
+  selector:
+    app.kubernetes.io/name: dockyards-talos
+    app.kubernetes.io/part-of: dockyards

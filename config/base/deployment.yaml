@@ -32,9 +32,13 @@ spec:
       - image: dockyards-talos
         name: dockyards-talos
         imagePullPolicy: IfNotPresent
+        args:
+        - --enable-discovery-service=false
         ports:
         - name: webhook
           containerPort: 9443
+        - name: discovery
+          containerPort: 6000
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

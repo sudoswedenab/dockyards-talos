@@ -53,7 +53,10 @@ func main() {
 	metricsBindAddress := "0"
 	pflag.StringVar(&metricsBindAddress, "metrics-bind-address", metricsBindAddress, "metrics bind address")
 
-	discoveryBindAdress := "0"
+	enableDiscoveryService := false
+	pflag.BoolVar(&enableDiscoveryService, "enable-discovery-service", enableDiscoveryService, "enable cluster discovery server")
+
+	discoveryBindAdress := ":6000"
 	pflag.StringVar(&discoveryBindAdress, "discovery-bind-address", discoveryBindAdress, "cluster discovery server bind address")
 
 	discoveryStatePath := "discovery_state.json"
@@ -62,7 +65,7 @@ func main() {
 	discoveryGCInterval := 1 * time.Minute
 	pflag.DurationVar(&discoveryGCInterval, "discovery-gc-interval", discoveryGCInterval, "interval at which discovery server should do garbage collection of its state")
 
-	discoveryNoTLS := false
+	discoveryNoTLS := true
 	pflag.BoolVar(&discoveryNoTLS, "no-discovery-tls", discoveryNoTLS, "do not use TLS for cluster discovery server")
 
 	discoveryTLSCertPath := "/tmp/dockyards-talos/serving-certs/discovery-service/ca.crt"
@@ -96,7 +99,7 @@ func main() {
 
 	var grpcListener net.Listener
 	var grpcServer *grpc.Server
-	if discoveryBindAdress != "0" {
+	if enableDiscoveryService {
 		var err error
 
 		grpcListener, err = net.Listen("tcp", discoveryBindAdress)
