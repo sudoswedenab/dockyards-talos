@@ -26,12 +26,15 @@ import (
 	"github.com/go-logr/logr"
 	discoveryv1 "github.com/siderolabs/discovery-api/api/v1alpha1/server/pb"
 	"github.com/spf13/pflag"
+	linkconfigv1alpha3 "github.com/sudoswedenab/dockyards-talos/api/v1alpha3"
 	"github.com/sudoswedenab/dockyards-talos/controllers"
 	"github.com/sudoswedenab/dockyards-talos/internal/discovery"
+	talosroutes "github.com/sudoswedenab/dockyards-talos/internal/routes"
 	"github.com/sudoswedenab/dockyards-talos/webhooks"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -178,12 +181,36 @@ func main() {
 		os.Exit(1)
 	}
 
+	err = clusterv1.AddToScheme(m.GetScheme())
+	if err != nil {
+		slogr.Error(err, "error adding cluster-api scheme")
+
+		os.Exit(1)
+	}
+
+	err = linkconfigv1alpha3.AddToScheme(m.GetScheme())
+	if err != nil {
+		slogr.Error(err, "error adding linkconfig scheme")
+
+		os.Exit(1)
+	}
+
 	err = (&controllers.DockyardsReleaseReconciler{
 		Client:           m.GetClient(),
 		ImageFactoryHost: imageFactoryHost,
 	}).SetupwithManager(m)
 	if err != nil {
 		slogr.Error(err, "error creating dockyards release reconciler")
+
+		os.Exit(1)
+	}
+
+	err = (&controllers.LinkConfigReconciler{
+		Client:   m.GetClient(),
+		Injector: talosroutes.NewTalosInjector(ctrl.Log.WithName("talos-routes")),
+	}).SetupWithManager(m)
+	if err != nil {
+		slogr.Error(err, "error creating linkconfig reconciler")
 
 		os.Exit(1)
 	}

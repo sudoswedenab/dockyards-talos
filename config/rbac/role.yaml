@@ -19,6 +19,51 @@ metadata:
   name: dockyards-talos
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - pods
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - machines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - dockyards.io
+  resources:
+  - linkconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dockyards.io
+  resources:
+  - linkconfigs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - dockyards.io
   resources:
   - releases
