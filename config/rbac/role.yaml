@@ -48,7 +48,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - dockyards.io
+  - talos.dockyards.io
   resources:
   - linkconfigs
   verbs:
@@ -56,7 +56,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - dockyards.io
+  - talos.dockyards.io
   resources:
   - linkconfigs/status
   verbs:

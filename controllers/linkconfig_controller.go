@@ -23,8 +23,8 @@ const (
 	machineLinkConfigAnnKey = "dockyards.io/link-config"
 )
 
-// +kubebuilder:rbac:groups=dockyards.io,resources=linkconfigs,verbs=get;list;watch
-// +kubebuilder:rbac:groups=dockyards.io,resources=linkconfigs/status,verbs=get;patch;update
+// +kubebuilder:rbac:groups=talos.dockyards.io,resources=linkconfigs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=talos.dockyards.io,resources=linkconfigs/status,verbs=get;patch;update
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch

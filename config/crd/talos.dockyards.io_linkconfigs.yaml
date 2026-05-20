@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: linkconfigs.dockyards.io
+  name: linkconfigs.talos.dockyards.io
 spec:
-  group: dockyards.io
+  group: talos.dockyards.io
   names:
     kind: LinkConfig
     listKind: LinkConfigList
