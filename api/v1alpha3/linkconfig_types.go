@@ -33,22 +33,12 @@ type LinkConfigSpec struct {
 	DefaultRoute *LinkConfigDefaultRoute `json:"defaultRoute,omitempty"`
 }
 
-type LinkConfigStatus struct {
-	Conditions         []metav1.Condition `json:"conditions,omitempty"`
-	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
-}
-
 // +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type==\"Ready\")].status"
-// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=".status.conditions[?(@.type==\"Ready\")].reason"
-// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 type LinkConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   LinkConfigSpec   `json:"spec,omitempty"`
-	Status LinkConfigStatus `json:"status,omitempty"`
+	Spec LinkConfigSpec `json:"spec,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -78,27 +68,6 @@ func (in *LinkConfigSpec) DeepCopy() *LinkConfigSpec {
 		return nil
 	}
 	out := new(LinkConfigSpec)
-	in.DeepCopyInto(out)
-
-	return out
-}
-
-func (in *LinkConfigStatus) DeepCopyInto(out *LinkConfigStatus) {
-	*out = *in
-	if in.Conditions != nil {
-		in, out := &in.Conditions, &out.Conditions
-		*out = make([]metav1.Condition, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
-}
-
-func (in *LinkConfigStatus) DeepCopy() *LinkConfigStatus {
-	if in == nil {
-		return nil
-	}
-	out := new(LinkConfigStatus)
 	in.DeepCopyInto(out)
 
 	return out
