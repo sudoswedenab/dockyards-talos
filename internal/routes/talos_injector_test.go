@@ -20,7 +20,7 @@ import (
 )
 
 func TestBuildLinkConfigPatch(t *testing.T) {
-	patch, err := buildLinkConfigPatch([]Route{
+	patch, err := buildLinkConfigPatch([]string{"eth1"}, []Route{
 		{Network: "100.66.0.0/16", Gateway: "100.66.3.1", Metric: 100, Interface: "eth1"},
 		{Network: "100.96.0.0/12", Gateway: "100.66.3.1", Metric: 0, Interface: "eth1"},
 		{Network: "", Gateway: "100.66.3.1", Metric: 0, Interface: "eth1"},
@@ -30,6 +30,19 @@ func TestBuildLinkConfigPatch(t *testing.T) {
 	}
 	if len(patch) == 0 {
 		t.Fatalf("expected non-empty patch")
+	}
+}
+
+func TestBuildLinkConfigPatch_IncludesEmptyRoutesForManagedInterface(t *testing.T) {
+	patch, err := buildLinkConfigPatch([]string{"eth1"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(patch), "name: eth1") {
+		t.Fatalf("expected patch to target eth1, got:\n%s", string(patch))
+	}
+	if !strings.Contains(string(patch), "routes: []") {
+		t.Fatalf("expected patch to clear routes with empty list, got:\n%s", string(patch))
 	}
 }
 
