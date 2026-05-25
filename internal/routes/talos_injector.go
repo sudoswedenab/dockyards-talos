@@ -50,7 +50,7 @@ func NewTalosInjector(logger logr.Logger) *TalosInjector {
 	return &TalosInjector{logger: logger}
 }
 
-func (i *TalosInjector) EnsureRoutes(ctx context.Context, node Node, talosConfig []byte, staticRoutes []Route, defaultRoute *Route) error {
+func (i *TalosInjector) EnsureRoutes(ctx context.Context, node Node, talosConfig []byte, staticRoutes []Route, defaultRoute *Route, managedInterfaces []string) error {
 	if len(talosConfig) == 0 {
 		return fmt.Errorf("talosconfig is empty")
 	}
@@ -90,30 +90,15 @@ func (i *TalosInjector) EnsureRoutes(ctx context.Context, node Node, talosConfig
 		return fmt.Errorf("extract machine config: %w", err)
 	}
 
-	if len(staticRoutes) > 0 {
-		if err := ensureRouteSet(callCtx, client, body, staticRoutes); err != nil {
-			return err
-		}
-	}
-
 	allRoutes := make([]Route, 0, len(staticRoutes)+1)
 	allRoutes = append(allRoutes, staticRoutes...)
 	if defaultRoute != nil {
 		allRoutes = append(allRoutes, *defaultRoute)
 	}
+	managed := normalizeManagedInterfaces(managedInterfaces, allRoutes)
 
-	if defaultRoute != nil {
-		mcRes, err := client.COSI.Get(callCtx, resource.NewMetadata(configres.NamespaceName, configres.MachineConfigType, configres.ActiveID, resource.VersionUndefined))
-		if err != nil {
-			return fmt.Errorf("get active machine config: %w", err)
-		}
-
-		body, err = extractMachineConfigBody(mcRes)
-		if err != nil {
-			return fmt.Errorf("extract machine config: %w", err)
-		}
-
-		if err := ensureRouteSet(callCtx, client, body, allRoutes); err != nil {
+	if len(managed) > 0 {
+		if err := ensureRouteSet(callCtx, client, body, managed, allRoutes); err != nil {
 			return err
 		}
 	}
@@ -131,6 +116,7 @@ func (i *TalosInjector) EnsureRoutes(ctx context.Context, node Node, talosConfig
 		"staticRoutes", len(staticRoutes),
 		"hasDefaultRoute", defaultRoute != nil,
 		"defaultRouteInterface", defaultIface,
+		"managedInterfaces", len(managed),
 	)
 
 	return nil
@@ -173,24 +159,45 @@ func patchAndApplyMachineConfig(ctx context.Context, client *talosclient.Client,
 	return nil
 }
 
-func ensureRouteSet(ctx context.Context, client *talosclient.Client, machineConfig []byte, routes []Route) error {
-	missingRoutes, err := missingRoutesFromMachineConfig(machineConfig, routes)
+func ensureRouteSet(ctx context.Context, client *talosclient.Client, machineConfig []byte, managedInterfaces []string, routes []Route) error {
+	patchBytes, err := buildLinkConfigPatch(managedInterfaces, routes)
 	if err != nil {
 		return err
 	}
 
-	if len(missingRoutes) > 0 {
-		patchBytes, err := buildLinkConfigPatch(missingRoutes)
-		if err != nil {
-			return err
-		}
-
-		if err := patchAndApplyMachineConfig(ctx, client, machineConfig, patchBytes); err != nil {
-			return err
-		}
+	if err := patchAndApplyMachineConfig(ctx, client, machineConfig, patchBytes); err != nil {
+		return err
 	}
 
 	return waitForRoutesApplied(ctx, client.COSI, routes, 30*time.Second)
+}
+
+func normalizeManagedInterfaces(managedInterfaces []string, desiredRoutes []Route) []string {
+	set := map[string]struct{}{}
+
+	for _, iface := range managedInterfaces {
+		iface = strings.TrimSpace(iface)
+		if iface == "" {
+			continue
+		}
+		set[iface] = struct{}{}
+	}
+
+	for _, route := range desiredRoutes {
+		iface := strings.TrimSpace(route.Interface)
+		if iface == "" {
+			continue
+		}
+		set[iface] = struct{}{}
+	}
+
+	out := make([]string, 0, len(set))
+	for iface := range set {
+		out = append(out, iface)
+	}
+	sort.Strings(out)
+
+	return out
 }
 
 type routeKey struct {
@@ -271,7 +278,7 @@ type linkConfigPatchDoc struct {
 	Kind       string                 `yaml:"kind"`
 	APIVersion string                 `yaml:"apiVersion"`
 	Name       string                 `yaml:"name"`
-	Routes     []linkConfigPatchRoute `yaml:"routes,omitempty"`
+	Routes     []linkConfigPatchRoute `yaml:"routes"`
 }
 
 type linkConfigPatchRoute struct {
@@ -280,7 +287,7 @@ type linkConfigPatchRoute struct {
 	Metric      uint32 `yaml:"metric,omitempty"`
 }
 
-func buildLinkConfigPatch(routes []Route) ([]byte, error) {
+func buildLinkConfigPatch(managedInterfaces []string, routes []Route) ([]byte, error) {
 	byIf := map[string][]Route{}
 	for i, r := range routes {
 		iface := strings.TrimSpace(r.Interface)
@@ -294,18 +301,13 @@ func buildLinkConfigPatch(routes []Route) ([]byte, error) {
 		byIf[iface] = append(byIf[iface], r)
 	}
 
-	if len(byIf) == 0 {
+	managed := normalizeManagedInterfaces(managedInterfaces, routes)
+	if len(managed) == 0 {
 		return []byte(""), nil
 	}
 
-	ifaces := make([]string, 0, len(byIf))
-	for k := range byIf {
-		ifaces = append(ifaces, k)
-	}
-	sort.Strings(ifaces)
-
 	var out bytes.Buffer
-	for idx, iface := range ifaces {
+	for idx, iface := range managed {
 		doc := linkConfigPatchDoc{
 			Kind:       "LinkConfig",
 			APIVersion: "v1alpha1",

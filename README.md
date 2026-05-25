@@ -59,7 +59,8 @@ Notes:
 - `spec.staticRoutes[].gateway` and `spec.defaultRoute.gateway` are optional.
 - If gateway is omitted, the controller derives it from VM pod annotation `k8s.ovn.org/pod-networks` by matching against the `Machine` internal IP.
 - `spec.staticRoutes[].interface` and `spec.defaultRoute.interface` are required.
-- Static routes are applied first; default route is applied after static routes are verified.
+- Reconciliation is authoritative for managed interfaces: removed routes are pruned from Talos machine config.
+- If the selected `LinkConfig` is deleted, reconciliation performs best-effort cleanup using the last applied state stored on the machine annotation.
 
 Machine selection behavior:
 

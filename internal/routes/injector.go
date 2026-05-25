@@ -36,7 +36,7 @@ type Route struct {
 }
 
 type Injector interface {
-	EnsureRoutes(ctx context.Context, node Node, talosConfig []byte, staticRoutes []Route, defaultRoute *Route) error
+	EnsureRoutes(ctx context.Context, node Node, talosConfig []byte, staticRoutes []Route, defaultRoute *Route, managedInterfaces []string) error
 }
 
 type NoopInjector struct {
@@ -47,7 +47,7 @@ func NewNoopInjector(logger logr.Logger) *NoopInjector {
 	return &NoopInjector{logger: logger}
 }
 
-func (i *NoopInjector) EnsureRoutes(_ context.Context, node Node, _ []byte, staticRoutes []Route, defaultRoute *Route) error {
+func (i *NoopInjector) EnsureRoutes(_ context.Context, node Node, _ []byte, staticRoutes []Route, defaultRoute *Route, managedInterfaces []string) error {
 	defaultIface := ""
 	if defaultRoute != nil {
 		defaultIface = defaultRoute.Interface
@@ -61,6 +61,7 @@ func (i *NoopInjector) EnsureRoutes(_ context.Context, node Node, _ []byte, stat
 		"staticRoutes", len(staticRoutes),
 		"hasDefaultRoute", defaultRoute != nil,
 		"defaultRouteInterface", defaultIface,
+		"managedInterfaces", len(managedInterfaces),
 	)
 
 	return nil
