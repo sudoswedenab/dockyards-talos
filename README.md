@@ -80,6 +80,7 @@ For each reconciled machine, the controller:
 - connects to Talos API on machine IP and port `50000`
 - patches node machine config with Talos `LinkConfig` documents via `ApplyConfiguration`
 - verifies desired routes via Talos `RouteSpecs.net.talos.dev`
+- stores the last reconciled payload on `Machine.metadata.annotations["dockyards.io/link-config-state"]` as JSON (linkconfig name/generation, static routes, default route)
 
 ### Gateway Derivation Details
 
