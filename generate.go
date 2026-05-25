@@ -14,7 +14,6 @@
 
 package main
 
-//go:generate go tool controller-gen object:headerFile=./hack/boilerplate.go.txt paths="./api/..."
 //go:generate go tool controller-gen rbac:roleName=dockyards-talos webhook paths="./..."
 //go:generate go tool controller-gen crd paths="./api/..." output:crd:artifacts:config=./config/crd
 //go:generate go tool addlicense -c "Sudo Sweden AB" -l apache -y "2025" .
