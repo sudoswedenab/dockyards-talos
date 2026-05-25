@@ -19,18 +19,26 @@ import (
 )
 
 const (
-	defaultLinkConfigName   = "default"
-	machineLinkConfigAnnKey = "dockyards.io/link-config"
+	defaultLinkConfigName        = "default"
+	machineLinkConfigAnnKey      = "dockyards.io/link-config"
+	machineLinkConfigStateAnnKey = "dockyards.io/link-config-state"
 )
 
 // +kubebuilder:rbac:groups=talos.dockyards.io,resources=linkconfigs,verbs=get;list;watch
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 type LinkConfigReconciler struct {
 	client.Client
 	Injector talosroutes.Injector
+}
+
+type machineLinkConfigStateAnnotation struct {
+	LinkConfigName       string              `json:"linkConfigName"`
+	LinkConfigGeneration int64               `json:"linkConfigGeneration"`
+	StaticRoutes         []talosroutes.Route `json:"staticRoutes,omitempty"`
+	DefaultRoute         *talosroutes.Route  `json:"defaultRoute,omitempty"`
 }
 
 func (r *LinkConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -106,9 +114,49 @@ func (r *LinkConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("ensure routes for machine %s: %w", machine.Name, err)
 	}
 
-	logger.Info("machine routes reconciled", "machine", machine.Name, "linkConfig", lc.Name, "staticRoutes", len(staticRoutes), "hasDefaultRoute", defaultRoute != nil)
+	annotationUpdated, err := r.persistReconciledLinkConfigState(ctx, &machine, &lc, staticRoutes, defaultRoute)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("persist reconciled routes annotation for machine %s: %w", machine.Name, err)
+	}
+
+	logger.Info("machine routes reconciled", "machine", machine.Name, "linkConfig", lc.Name, "staticRoutes", len(staticRoutes), "hasDefaultRoute", defaultRoute != nil, "annotationUpdated", annotationUpdated)
 
 	return ctrl.Result{}, nil
+}
+
+func (r *LinkConfigReconciler) persistReconciledLinkConfigState(ctx context.Context, machine *clusterv1.Machine, lc *linkconfigv1alpha3.LinkConfig, staticRoutes []talosroutes.Route, defaultRoute *talosroutes.Route) (bool, error) {
+	payload := machineLinkConfigStateAnnotation{
+		LinkConfigName:       lc.Name,
+		LinkConfigGeneration: lc.Generation,
+		StaticRoutes:         staticRoutes,
+		DefaultRoute:         defaultRoute,
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return false, fmt.Errorf("marshal linkconfig annotation payload: %w", err)
+	}
+
+	oldValue := ""
+	if machine.Annotations != nil {
+		oldValue = machine.Annotations[machineLinkConfigStateAnnKey]
+	}
+	newValue := string(b)
+	if oldValue == newValue {
+		return false, nil
+	}
+
+	base := machine.DeepCopy()
+	if machine.Annotations == nil {
+		machine.Annotations = map[string]string{}
+	}
+	machine.Annotations[machineLinkConfigStateAnnKey] = newValue
+
+	if err := r.Patch(ctx, machine, client.MergeFrom(base)); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func (r *LinkConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
