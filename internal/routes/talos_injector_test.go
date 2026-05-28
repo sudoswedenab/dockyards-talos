@@ -17,6 +17,9 @@ package routes
 import (
 	"strings"
 	"testing"
+
+	"github.com/siderolabs/talos/pkg/machinery/config/configpatcher"
+	netcfg "github.com/siderolabs/talos/pkg/machinery/config/types/network"
 )
 
 func TestBuildLinkConfigPatch(t *testing.T) {
@@ -24,7 +27,7 @@ func TestBuildLinkConfigPatch(t *testing.T) {
 		{Network: "100.66.0.0/16", Gateway: "100.66.3.1", Metric: 100, Interface: "eth1"},
 		{Network: "100.96.0.0/12", Gateway: "100.66.3.1", Metric: 0, Interface: "eth1"},
 		{Network: "", Gateway: "100.66.3.1", Metric: 0, Interface: "eth1"},
-	})
+	}, map[string]*netcfg.LinkConfigV1Alpha1{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -34,7 +37,9 @@ func TestBuildLinkConfigPatch(t *testing.T) {
 }
 
 func TestBuildLinkConfigPatch_IncludesEmptyRoutesForManagedInterface(t *testing.T) {
-	patch, err := buildLinkConfigPatch([]string{"eth1"}, nil)
+	patch, err := buildLinkConfigPatch([]string{"eth1"}, nil, map[string]*netcfg.LinkConfigV1Alpha1{
+		"eth1": netcfg.NewLinkConfigV1Alpha1("eth1"),
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,5 +73,82 @@ routes:
 	}
 	if len(missing) != 0 {
 		t.Fatalf("expected no missing routes, got %d", len(missing))
+	}
+}
+
+func TestStrategicMergePatch_AppendsRoutesByDefault(t *testing.T) {
+	base := []byte(strings.TrimSpace(`
+apiVersion: v1alpha1
+kind: LinkConfig
+name: eth0
+routes:
+  - destination: 83.255.255.26/32
+    gateway: 100.66.11.1
+`) + "\n")
+
+	patchBytes := []byte(strings.TrimSpace(`
+apiVersion: v1alpha1
+kind: LinkConfig
+name: eth0
+routes:
+  - destination: 10.17.66.34/32
+    gateway: 100.66.11.1
+`) + "\n")
+
+	patch, err := configpatcher.LoadPatch(patchBytes)
+	if err != nil {
+		t.Fatalf("load patch: %v", err)
+	}
+
+	patchedCfg, err := configpatcher.Apply(configpatcher.WithBytes(base), []configpatcher.Patch{patch})
+	if err != nil {
+		t.Fatalf("apply patch: %v", err)
+	}
+
+	out, err := patchedCfg.Bytes()
+	if err != nil {
+		t.Fatalf("encode config: %v", err)
+	}
+
+	s := string(out)
+	if !strings.Contains(s, "83.255.255.26/32") || !strings.Contains(s, "10.17.66.34/32") {
+		t.Fatalf("expected both old and new routes in patched config, got:\n%s", s)
+	}
+}
+
+func TestStrategicMergePatch_DocumentDeleteDirective(t *testing.T) {
+	base := []byte(strings.TrimSpace(`
+apiVersion: v1alpha1
+kind: LinkConfig
+name: eth0
+routes:
+  - destination: 83.255.255.26/32
+    gateway: 100.66.11.1
+`) + "\n")
+
+	patchBytes := []byte(strings.TrimSpace(`
+apiVersion: v1alpha1
+kind: LinkConfig
+name: eth0
+$patch: delete
+`) + "\n")
+
+	patch, err := configpatcher.LoadPatch(patchBytes)
+	if err != nil {
+		t.Fatalf("load patch: %v", err)
+	}
+
+	patchedCfg, err := configpatcher.Apply(configpatcher.WithBytes(base), []configpatcher.Patch{patch})
+	if err != nil {
+		t.Fatalf("apply patch: %v", err)
+	}
+
+	out, err := patchedCfg.Bytes()
+	if err != nil {
+		t.Fatalf("encode config: %v", err)
+	}
+
+	if strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("expected linkconfig doc to be removed, got:\n%s", string(out))
 	}
 }

@@ -160,12 +160,42 @@ func patchAndApplyMachineConfig(ctx context.Context, client *talosclient.Client,
 }
 
 func ensureRouteSet(ctx context.Context, client *talosclient.Client, machineConfig []byte, managedInterfaces []string, routes []Route) error {
-	patchBytes, err := buildLinkConfigPatch(managedInterfaces, routes)
+	managed := normalizeManagedInterfaces(managedInterfaces, routes)
+	if len(managed) == 0 {
+		return waitForRoutesApplied(ctx, client.COSI, routes, 30*time.Second)
+	}
+
+	existingByIf, err := linkConfigsFromMachineConfig(machineConfig)
 	if err != nil {
 		return err
 	}
 
-	if err := patchAndApplyMachineConfig(ctx, client, machineConfig, patchBytes); err != nil {
+	deletePatchBytes, err := buildLinkConfigDeletePatch(managed, existingByIf)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(deletePatchBytes)) > 0 {
+		if err := patchAndApplyMachineConfig(ctx, client, machineConfig, deletePatchBytes); err != nil {
+			return err
+		}
+
+		mcRes, err := client.COSI.Get(ctx, resource.NewMetadata(configres.NamespaceName, configres.MachineConfigType, configres.ActiveID, resource.VersionUndefined))
+		if err != nil {
+			return fmt.Errorf("get active machine config: %w", err)
+		}
+
+		machineConfig, err = extractMachineConfigBody(mcRes)
+		if err != nil {
+			return fmt.Errorf("extract machine config: %w", err)
+		}
+	}
+
+	replacementPatchBytes, err := buildLinkConfigPatch(managed, routes, existingByIf)
+	if err != nil {
+		return err
+	}
+
+	if err := patchAndApplyMachineConfig(ctx, client, machineConfig, replacementPatchBytes); err != nil {
 		return err
 	}
 
@@ -278,7 +308,18 @@ type linkConfigPatchDoc struct {
 	Kind       string                 `yaml:"kind"`
 	APIVersion string                 `yaml:"apiVersion"`
 	Name       string                 `yaml:"name"`
+	Up         *bool                  `yaml:"up,omitempty"`
+	MTU        uint32                 `yaml:"mtu,omitempty"`
+	Addresses  []netcfg.AddressConfig `yaml:"addresses,omitempty"`
+	Multicast  *bool                  `yaml:"multicast,omitempty"`
 	Routes     []linkConfigPatchRoute `yaml:"routes"`
+}
+
+type linkConfigDeletePatchDoc struct {
+	Kind       string `yaml:"kind"`
+	APIVersion string `yaml:"apiVersion"`
+	Name       string `yaml:"name"`
+	Patch      string `yaml:"$patch"`
 }
 
 type linkConfigPatchRoute struct {
@@ -287,7 +328,7 @@ type linkConfigPatchRoute struct {
 	Metric      uint32 `yaml:"metric,omitempty"`
 }
 
-func buildLinkConfigPatch(managedInterfaces []string, routes []Route) ([]byte, error) {
+func buildLinkConfigPatch(managedInterfaces []string, routes []Route, existingByIf map[string]*netcfg.LinkConfigV1Alpha1) ([]byte, error) {
 	byIf := map[string][]Route{}
 	for i, r := range routes {
 		iface := strings.TrimSpace(r.Interface)
@@ -308,14 +349,28 @@ func buildLinkConfigPatch(managedInterfaces []string, routes []Route) ([]byte, e
 
 	var out bytes.Buffer
 	for idx, iface := range managed {
+		desiredRoutes := byIf[iface]
+		if len(desiredRoutes) == 0 {
+			if _, ok := existingByIf[iface]; !ok {
+				continue
+			}
+		}
+
 		doc := linkConfigPatchDoc{
 			Kind:       "LinkConfig",
 			APIVersion: "v1alpha1",
 			Name:       iface,
-			Routes:     make([]linkConfigPatchRoute, 0, len(byIf[iface])),
+			Routes:     make([]linkConfigPatchRoute, 0, len(desiredRoutes)),
 		}
 
-		for _, r := range byIf[iface] {
+		if existingDoc, ok := existingByIf[iface]; ok {
+			doc.Up = existingDoc.LinkUp
+			doc.MTU = existingDoc.LinkMTU
+			doc.Multicast = existingDoc.LinkMulticast
+			doc.Addresses = append([]netcfg.AddressConfig(nil), existingDoc.LinkAddresses...)
+		}
+
+		for _, r := range desiredRoutes {
 			doc.Routes = append(doc.Routes, linkConfigPatchRoute{
 				Destination: r.Network,
 				Gateway:     r.Gateway,
@@ -334,6 +389,63 @@ func buildLinkConfigPatch(managedInterfaces []string, routes []Route) ([]byte, e
 	}
 
 	return out.Bytes(), nil
+}
+
+func buildLinkConfigDeletePatch(managedInterfaces []string, existingByIf map[string]*netcfg.LinkConfigV1Alpha1) ([]byte, error) {
+	if len(managedInterfaces) == 0 {
+		return []byte(""), nil
+	}
+
+	var out bytes.Buffer
+	first := true
+	for _, iface := range managedInterfaces {
+		if _, ok := existingByIf[iface]; !ok {
+			continue
+		}
+
+		doc := linkConfigDeletePatchDoc{
+			Kind:       "LinkConfig",
+			APIVersion: "v1alpha1",
+			Name:       iface,
+			Patch:      "delete",
+		}
+
+		b, err := yaml.Marshal(doc)
+		if err != nil {
+			return nil, err
+		}
+		if !first {
+			out.WriteString("---\n")
+		}
+		out.Write(b)
+		first = false
+	}
+
+	return out.Bytes(), nil
+}
+
+func linkConfigsFromMachineConfig(machineConfig []byte) (map[string]*netcfg.LinkConfigV1Alpha1, error) {
+	cfg, err := configloader.NewFromBytes(machineConfig)
+	if err != nil {
+		return nil, fmt.Errorf("parse machine config: %w", err)
+	}
+
+	out := map[string]*netcfg.LinkConfigV1Alpha1{}
+	for _, doc := range cfg.Documents() {
+		lc, ok := doc.(*netcfg.LinkConfigV1Alpha1)
+		if !ok {
+			continue
+		}
+
+		iface := strings.TrimSpace(lc.MetaName)
+		if iface == "" {
+			continue
+		}
+
+		out[iface] = lc.DeepCopy()
+	}
+
+	return out, nil
 }
 
 func expectedMachineConfigRouteSpec(r Route) (network.RouteSpecSpec, string, error) {
