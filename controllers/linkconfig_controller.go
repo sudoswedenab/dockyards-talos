@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	linkconfigv1alpha3 "github.com/sudoswedenab/dockyards-talos/api/v1alpha3"
 	talosroutes "github.com/sudoswedenab/dockyards-talos/internal/routes"
 	corev1 "k8s.io/api/core/v1"
@@ -79,39 +80,11 @@ func (r *LinkConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	var lc linkconfigv1alpha3.LinkConfig
 	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: linkConfigName}, &lc); err != nil {
-		if apierrors.IsNotFound(err) {
-			managedInterfaces := managedInterfacesFromState(lastAppliedState)
-			if lastAppliedState == nil || lastAppliedState.LinkConfigName != linkConfigName || len(managedInterfaces) == 0 {
-				logger.Info("linkconfig not found for machine", "machine", machine.Name, "linkConfig", linkConfigName)
-
-				return ctrl.Result{}, nil
-			}
-
-			node, err := extractNodeFromMachine(&machine)
-			if err != nil {
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, err
-			}
-
-			talosConfig, err := extractTalosConfigFromClusterSecret(ctx, r.Client, &machine)
-			if err != nil {
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, err
-			}
-
-			if err := r.Injector.EnsureRoutes(ctx, node, talosConfig, nil, nil, managedInterfaces); err != nil {
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("ensure route cleanup for machine %s: %w", machine.Name, err)
-			}
-
-			annotationUpdated, err := r.persistReconciledLinkConfigState(ctx, &machine, linkConfigName, 0, nil, nil)
-			if err != nil {
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("persist route cleanup annotation for machine %s: %w", machine.Name, err)
-			}
-
-			logger.Info("machine routes cleaned after missing linkconfig", "machine", machine.Name, "linkConfig", linkConfigName, "managedInterfaces", len(managedInterfaces), "annotationUpdated", annotationUpdated)
-
-			return ctrl.Result{}, nil
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{}, err
+		return r.reconcileMissingLinkConfig(ctx, logger, &machine, linkConfigName, lastAppliedState)
 	}
 
 	staticRoutes, defaultRoute, err := extractDesiredRoutes(&lc)
@@ -168,6 +141,38 @@ func (r *LinkConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	logger.Info("machine routes reconciled", "machine", machine.Name, "linkConfig", lc.Name, "staticRoutes", len(staticRoutes), "hasDefaultRoute", defaultRoute != nil, "annotationUpdated", annotationUpdated)
+
+	return ctrl.Result{}, nil
+}
+
+func (r *LinkConfigReconciler) reconcileMissingLinkConfig(ctx context.Context, logger logr.Logger, machine *clusterv1.Machine, linkConfigName string, lastAppliedState *machineLinkConfigStateAnnotation) (ctrl.Result, error) {
+	managedInterfaces := managedInterfacesFromState(lastAppliedState)
+	if lastAppliedState == nil || lastAppliedState.LinkConfigName != linkConfigName || len(managedInterfaces) == 0 {
+		logger.Info("linkconfig not found for machine", "machine", machine.Name, "linkConfig", linkConfigName)
+
+		return ctrl.Result{}, nil
+	}
+
+	node, err := extractNodeFromMachine(machine)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+	}
+
+	talosConfig, err := extractTalosConfigFromClusterSecret(ctx, r.Client, machine)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+	}
+
+	if err := r.Injector.EnsureRoutes(ctx, node, talosConfig, nil, nil, managedInterfaces); err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("ensure route cleanup for machine %s: %w", machine.Name, err)
+	}
+
+	annotationUpdated, err := r.persistReconciledLinkConfigState(ctx, machine, linkConfigName, 0, nil, nil)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("persist route cleanup annotation for machine %s: %w", machine.Name, err)
+	}
+
+	logger.Info("machine routes cleaned after missing linkconfig", "machine", machine.Name, "linkConfig", linkConfigName, "managedInterfaces", len(managedInterfaces), "annotationUpdated", annotationUpdated)
 
 	return ctrl.Result{}, nil
 }
