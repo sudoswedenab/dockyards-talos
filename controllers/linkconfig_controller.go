@@ -1,3 +1,17 @@
+// Copyright 2025 Sudo Sweden AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package controllers
 
 import (
@@ -9,9 +23,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	linkconfigv1alpha3 "github.com/sudoswedenab/dockyards-talos/api/v1alpha3"
 	talosroutes "github.com/sudoswedenab/dockyards-talos/internal/routes"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -19,18 +35,26 @@ import (
 )
 
 const (
-	defaultLinkConfigName   = "default"
-	machineLinkConfigAnnKey = "dockyards.io/link-config"
+	defaultLinkConfigName        = "default"
+	machineLinkConfigAnnKey      = "dockyards.io/link-config"
+	machineLinkConfigStateAnnKey = "dockyards.io/link-config-state"
 )
 
 // +kubebuilder:rbac:groups=talos.dockyards.io,resources=linkconfigs,verbs=get;list;watch
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch;patch;update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 type LinkConfigReconciler struct {
 	client.Client
 	Injector talosroutes.Injector
+}
+
+type machineLinkConfigStateAnnotation struct {
+	LinkConfigName       string              `json:"linkConfigName"`
+	LinkConfigGeneration int64               `json:"linkConfigGeneration"`
+	StaticRoutes         []talosroutes.Route `json:"staticRoutes,omitempty"`
+	DefaultRoute         *talosroutes.Route  `json:"defaultRoute,omitempty"`
 }
 
 func (r *LinkConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -49,15 +73,18 @@ func (r *LinkConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		linkConfigName = v
 	}
 
+	lastAppliedState, err := extractLinkConfigStateFromMachine(&machine)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("decode machine annotation %q for %s: %w", machineLinkConfigStateAnnKey, machine.Name, err)
+	}
+
 	var lc linkconfigv1alpha3.LinkConfig
 	if err := r.Get(ctx, client.ObjectKey{Namespace: machine.Namespace, Name: linkConfigName}, &lc); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			logger.Info("linkconfig not found for machine", "machine", machine.Name, "linkConfig", linkConfigName)
-
-			return ctrl.Result{}, nil
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, err
 		}
 
-		return ctrl.Result{}, err
+		return r.reconcileMissingLinkConfig(ctx, logger, &machine, linkConfigName, lastAppliedState)
 	}
 
 	staticRoutes, defaultRoute, err := extractDesiredRoutes(&lc)
@@ -102,13 +129,164 @@ func (r *LinkConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	if err := r.Injector.EnsureRoutes(ctx, node, talosConfig, staticRoutes, defaultRoute); err != nil {
+	managedInterfaces := mergeManagedInterfaces(lastAppliedState, staticRoutes, defaultRoute)
+
+	if err := r.Injector.EnsureRoutes(ctx, node, talosConfig, staticRoutes, defaultRoute, managedInterfaces); err != nil {
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("ensure routes for machine %s: %w", machine.Name, err)
 	}
 
-	logger.Info("machine routes reconciled", "machine", machine.Name, "linkConfig", lc.Name, "staticRoutes", len(staticRoutes), "hasDefaultRoute", defaultRoute != nil)
+	annotationUpdated, err := r.persistReconciledLinkConfigState(ctx, &machine, lc.Name, lc.Generation, staticRoutes, defaultRoute)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("persist reconciled routes annotation for machine %s: %w", machine.Name, err)
+	}
+
+	logger.Info("machine routes reconciled", "machine", machine.Name, "linkConfig", lc.Name, "staticRoutes", len(staticRoutes), "hasDefaultRoute", defaultRoute != nil, "annotationUpdated", annotationUpdated)
 
 	return ctrl.Result{}, nil
+}
+
+func (r *LinkConfigReconciler) reconcileMissingLinkConfig(ctx context.Context, logger logr.Logger, machine *clusterv1.Machine, linkConfigName string, lastAppliedState *machineLinkConfigStateAnnotation) (ctrl.Result, error) {
+	managedInterfaces := managedInterfacesFromState(lastAppliedState)
+	if lastAppliedState == nil || lastAppliedState.LinkConfigName != linkConfigName || len(managedInterfaces) == 0 {
+		logger.Info("linkconfig not found for machine", "machine", machine.Name, "linkConfig", linkConfigName)
+
+		return ctrl.Result{}, nil
+	}
+
+	node, err := extractNodeFromMachine(machine)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+	}
+
+	talosConfig, err := extractTalosConfigFromClusterSecret(ctx, r.Client, machine)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, err
+	}
+
+	if err := r.Injector.EnsureRoutes(ctx, node, talosConfig, nil, nil, managedInterfaces); err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("ensure route cleanup for machine %s: %w", machine.Name, err)
+	}
+
+	annotationUpdated, err := r.persistReconciledLinkConfigState(ctx, machine, linkConfigName, 0, nil, nil)
+	if err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, fmt.Errorf("persist route cleanup annotation for machine %s: %w", machine.Name, err)
+	}
+
+	logger.Info("machine routes cleaned after missing linkconfig", "machine", machine.Name, "linkConfig", linkConfigName, "managedInterfaces", len(managedInterfaces), "annotationUpdated", annotationUpdated)
+
+	return ctrl.Result{}, nil
+}
+
+func (r *LinkConfigReconciler) persistReconciledLinkConfigState(ctx context.Context, machine *clusterv1.Machine, linkConfigName string, linkConfigGeneration int64, staticRoutes []talosroutes.Route, defaultRoute *talosroutes.Route) (bool, error) {
+	payload := machineLinkConfigStateAnnotation{
+		LinkConfigName:       linkConfigName,
+		LinkConfigGeneration: linkConfigGeneration,
+		StaticRoutes:         staticRoutes,
+		DefaultRoute:         defaultRoute,
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return false, fmt.Errorf("marshal linkconfig annotation payload: %w", err)
+	}
+
+	oldValue := ""
+	if machine.Annotations != nil {
+		oldValue = machine.Annotations[machineLinkConfigStateAnnKey]
+	}
+	newValue := string(b)
+	if oldValue == newValue {
+		return false, nil
+	}
+
+	base := machine.DeepCopy()
+	if machine.Annotations == nil {
+		machine.Annotations = map[string]string{}
+	}
+	machine.Annotations[machineLinkConfigStateAnnKey] = newValue
+
+	if err := r.Patch(ctx, machine, client.MergeFrom(base)); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func extractLinkConfigStateFromMachine(machine *clusterv1.Machine) (*machineLinkConfigStateAnnotation, error) {
+	if machine.Annotations == nil {
+		return nil, nil
+	}
+
+	raw := strings.TrimSpace(machine.Annotations[machineLinkConfigStateAnnKey])
+	if raw == "" {
+		return nil, nil
+	}
+
+	var out machineLinkConfigStateAnnotation
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, err
+	}
+
+	return &out, nil
+}
+
+func mergeManagedInterfaces(lastAppliedState *machineLinkConfigStateAnnotation, staticRoutes []talosroutes.Route, defaultRoute *talosroutes.Route) []string {
+	set := map[string]struct{}{}
+
+	for _, route := range staticRoutes {
+		iface := strings.TrimSpace(route.Interface)
+		if iface == "" {
+			continue
+		}
+		set[iface] = struct{}{}
+	}
+	if defaultRoute != nil {
+		iface := strings.TrimSpace(defaultRoute.Interface)
+		if iface != "" {
+			set[iface] = struct{}{}
+		}
+	}
+
+	for _, iface := range managedInterfacesFromState(lastAppliedState) {
+		set[iface] = struct{}{}
+	}
+
+	out := make([]string, 0, len(set))
+	for iface := range set {
+		out = append(out, iface)
+	}
+	sort.Strings(out)
+
+	return out
+}
+
+func managedInterfacesFromState(state *machineLinkConfigStateAnnotation) []string {
+	if state == nil {
+		return nil
+	}
+
+	set := map[string]struct{}{}
+	for _, route := range state.StaticRoutes {
+		iface := strings.TrimSpace(route.Interface)
+		if iface == "" {
+			continue
+		}
+		set[iface] = struct{}{}
+	}
+	if state.DefaultRoute != nil {
+		iface := strings.TrimSpace(state.DefaultRoute.Interface)
+		if iface != "" {
+			set[iface] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(set))
+	for iface := range set {
+		out = append(out, iface)
+	}
+	sort.Strings(out)
+
+	return out
 }
 
 func (r *LinkConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {

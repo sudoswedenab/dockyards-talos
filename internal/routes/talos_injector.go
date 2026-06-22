@@ -1,3 +1,17 @@
+// Copyright 2025 Sudo Sweden AB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package routes
 
 import (
@@ -18,8 +32,9 @@ import (
 	machineapi "github.com/siderolabs/talos/pkg/machinery/api/machine"
 	talosclient "github.com/siderolabs/talos/pkg/machinery/client"
 	talosclientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
+	configdoc "github.com/siderolabs/talos/pkg/machinery/config/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/container"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
-	"github.com/siderolabs/talos/pkg/machinery/config/configpatcher"
 	netcfg "github.com/siderolabs/talos/pkg/machinery/config/types/network"
 	"github.com/siderolabs/talos/pkg/machinery/nethelpers"
 	configres "github.com/siderolabs/talos/pkg/machinery/resources/config"
@@ -36,7 +51,7 @@ func NewTalosInjector(logger logr.Logger) *TalosInjector {
 	return &TalosInjector{logger: logger}
 }
 
-func (i *TalosInjector) EnsureRoutes(ctx context.Context, node Node, talosConfig []byte, staticRoutes []Route, defaultRoute *Route) error {
+func (i *TalosInjector) EnsureRoutes(ctx context.Context, node Node, talosConfig []byte, staticRoutes []Route, defaultRoute *Route, managedInterfaces []string) error {
 	if len(talosConfig) == 0 {
 		return fmt.Errorf("talosconfig is empty")
 	}
@@ -76,30 +91,15 @@ func (i *TalosInjector) EnsureRoutes(ctx context.Context, node Node, talosConfig
 		return fmt.Errorf("extract machine config: %w", err)
 	}
 
-	if len(staticRoutes) > 0 {
-		if err := ensureRouteSet(callCtx, client, body, staticRoutes); err != nil {
-			return err
-		}
-	}
-
 	allRoutes := make([]Route, 0, len(staticRoutes)+1)
 	allRoutes = append(allRoutes, staticRoutes...)
 	if defaultRoute != nil {
 		allRoutes = append(allRoutes, *defaultRoute)
 	}
+	managed := normalizeManagedInterfaces(managedInterfaces, allRoutes)
 
-	if defaultRoute != nil {
-		mcRes, err := client.COSI.Get(callCtx, resource.NewMetadata(configres.NamespaceName, configres.MachineConfigType, configres.ActiveID, resource.VersionUndefined))
-		if err != nil {
-			return fmt.Errorf("get active machine config: %w", err)
-		}
-
-		body, err = extractMachineConfigBody(mcRes)
-		if err != nil {
-			return fmt.Errorf("extract machine config: %w", err)
-		}
-
-		if err := ensureRouteSet(callCtx, client, body, allRoutes); err != nil {
+	if len(managed) > 0 {
+		if err := ensureRouteSet(callCtx, client, body, managed, allRoutes); err != nil {
 			return err
 		}
 	}
@@ -117,37 +117,19 @@ func (i *TalosInjector) EnsureRoutes(ctx context.Context, node Node, talosConfig
 		"staticRoutes", len(staticRoutes),
 		"hasDefaultRoute", defaultRoute != nil,
 		"defaultRouteInterface", defaultIface,
+		"managedInterfaces", len(managed),
 	)
 
 	return nil
 }
 
-func patchAndApplyMachineConfig(ctx context.Context, client *talosclient.Client, baseConfig []byte, patchBytes []byte) error {
-	if len(bytes.TrimSpace(patchBytes)) == 0 {
+func applyMachineConfig(ctx context.Context, client *talosclient.Client, baseConfig []byte, updatedConfig []byte) error {
+	if bytes.Equal(bytes.TrimSpace(updatedConfig), bytes.TrimSpace(baseConfig)) {
 		return nil
 	}
 
-	patch, err := configpatcher.LoadPatch(patchBytes)
-	if err != nil {
-		return fmt.Errorf("load linkconfig patch: %w", err)
-	}
-
-	patchedCfg, err := configpatcher.Apply(configpatcher.WithBytes(baseConfig), []configpatcher.Patch{patch})
-	if err != nil {
-		return fmt.Errorf("apply linkconfig patch: %w", err)
-	}
-
-	patched, err := patchedCfg.Bytes()
-	if err != nil {
-		return fmt.Errorf("encode patched config: %w", err)
-	}
-
-	if bytes.Equal(bytes.TrimSpace(patched), bytes.TrimSpace(baseConfig)) {
-		return nil
-	}
-
-	_, err = client.ApplyConfiguration(ctx, &machineapi.ApplyConfigurationRequest{
-		Data:           patched,
+	_, err := client.ApplyConfiguration(ctx, &machineapi.ApplyConfigurationRequest{
+		Data:           updatedConfig,
 		Mode:           machineapi.ApplyConfigurationRequest_NO_REBOOT,
 		DryRun:         false,
 		TryModeTimeout: durationpb.New(0),
@@ -159,19 +141,24 @@ func patchAndApplyMachineConfig(ctx context.Context, client *talosclient.Client,
 	return nil
 }
 
-func ensureRouteSet(ctx context.Context, client *talosclient.Client, machineConfig []byte, routes []Route) error {
-	missingRoutes, err := missingRoutesFromMachineConfig(machineConfig, routes)
+func ensureRouteSet(ctx context.Context, client *talosclient.Client, machineConfig []byte, managedInterfaces []string, routes []Route) error {
+	managed := normalizeManagedInterfaces(managedInterfaces, routes)
+	if len(managed) == 0 {
+		return waitForRoutesApplied(ctx, client.COSI, routes, 30*time.Second)
+	}
+
+	desiredByIf, err := desiredRouteConfigsByInterface(managed, routes)
 	if err != nil {
 		return err
 	}
 
-	if len(missingRoutes) > 0 {
-		patchBytes, err := buildLinkConfigPatch(missingRoutes)
-		if err != nil {
-			return err
-		}
+	updatedMachineConfig, changed, err := reconcileManagedLinkRoutes(machineConfig, desiredByIf)
+	if err != nil {
+		return err
+	}
 
-		if err := patchAndApplyMachineConfig(ctx, client, machineConfig, patchBytes); err != nil {
+	if changed {
+		if err := applyMachineConfig(ctx, client, machineConfig, updatedMachineConfig); err != nil {
 			return err
 		}
 	}
@@ -179,145 +166,244 @@ func ensureRouteSet(ctx context.Context, client *talosclient.Client, machineConf
 	return waitForRoutesApplied(ctx, client.COSI, routes, 30*time.Second)
 }
 
-type routeKey struct {
-	iface   string
-	dst     string
-	gateway string
-	metric  uint32
+type linkRouteSignature struct {
+	Destination string
+	Gateway     string
+	Source      string
+	Metric      uint32
+	MTU         uint32
+	Table       uint32
 }
 
-func missingRoutesFromMachineConfig(machineConfig []byte, desired []Route) ([]Route, error) {
-	cfg, err := configloader.NewFromBytes(machineConfig)
-	if err != nil {
-		return nil, fmt.Errorf("parse machine config: %w", err)
+func desiredRouteConfigsByInterface(managedInterfaces []string, routes []Route) (map[string][]netcfg.RouteConfig, error) {
+	out := make(map[string][]netcfg.RouteConfig, len(managedInterfaces))
+	for _, iface := range managedInterfaces {
+		iface = strings.TrimSpace(iface)
+		if iface == "" {
+			continue
+		}
+
+		out[iface] = nil
 	}
 
-	existing := map[routeKey]struct{}{}
+	for i, r := range routes {
+		iface := strings.TrimSpace(r.Interface)
+		if iface == "" {
+			return nil, fmt.Errorf("routes[%d].interface is empty", i)
+		}
 
-	for _, doc := range cfg.Documents() {
+		gateway := strings.TrimSpace(r.Gateway)
+		if gateway == "" {
+			return nil, fmt.Errorf("routes[%d].gateway is empty (expected controller to derive it)", i)
+		}
+
+		gwAddr, err := netip.ParseAddr(gateway)
+		if err != nil {
+			return nil, fmt.Errorf("parse routes[%d].gateway %q: %w", i, gateway, err)
+		}
+
+		routeCfg := netcfg.RouteConfig{
+			RouteGateway: netcfg.Addr{Addr: gwAddr},
+			RouteMetric:  r.Metric,
+		}
+
+		network := strings.TrimSpace(r.Network)
+		if network != "" {
+			prefix, err := netip.ParsePrefix(network)
+			if err != nil {
+				return nil, fmt.Errorf("parse routes[%d].network %q: %w", i, network, err)
+			}
+
+			routeCfg.RouteDestination = netcfg.Prefix{Prefix: prefix}
+		}
+
+		out[iface] = append(out[iface], routeCfg)
+	}
+
+	for iface := range out {
+		out[iface] = sortRouteConfigs(out[iface])
+	}
+
+	return out, nil
+}
+
+func reconcileManagedLinkRoutes(machineConfig []byte, desiredByInterface map[string][]netcfg.RouteConfig) ([]byte, bool, error) {
+	if len(desiredByInterface) == 0 {
+		return machineConfig, false, nil
+	}
+
+	cfg, err := configloader.NewFromBytes(machineConfig)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse machine config: %w", err)
+	}
+
+	cloned := cfg.Clone()
+	docs := append([]configdoc.Document(nil), cloned.Documents()...)
+
+	changed := false
+	seenInterfaces := map[string]struct{}{}
+
+	for _, doc := range docs {
 		lc, ok := doc.(*netcfg.LinkConfigV1Alpha1)
 		if !ok {
 			continue
 		}
 
 		iface := strings.TrimSpace(lc.MetaName)
-		if iface == "" {
+		desiredRoutes, managed := desiredByInterface[iface]
+		if !managed {
 			continue
 		}
 
-		for _, r := range lc.LinkRoutes {
-			dst := ""
-			if r.RouteDestination.Prefix != (netip.Prefix{}) {
-				dst = r.RouteDestination.String()
-			}
-
-			gw := ""
-			if r.RouteGateway.Addr != (netip.Addr{}) {
-				gw = r.RouteGateway.String()
-			}
-
-			existing[routeKey{iface: iface, dst: dst, gateway: gw, metric: r.RouteMetric}] = struct{}{}
+		desiredRoutes = sortRouteConfigs(desiredRoutes)
+		existingRoutes := sortRouteConfigs(lc.LinkRoutes)
+		if !sameRouteConfigs(existingRoutes, desiredRoutes) {
+			changed = true
 		}
+
+		lc.LinkRoutes = append([]netcfg.RouteConfig(nil), desiredRoutes...)
+		seenInterfaces[iface] = struct{}{}
 	}
 
-	missing := make([]Route, 0)
-	for _, r := range desired {
-		iface := strings.TrimSpace(r.Interface)
-		if iface == "" {
-			return nil, fmt.Errorf("route interface is empty")
+	missingInterfaces := make([]string, 0)
+	for iface, desiredRoutes := range desiredByInterface {
+		if _, seen := seenInterfaces[iface]; seen {
+			continue
 		}
-
-		gwAddr, err := netip.ParseAddr(strings.TrimSpace(r.Gateway))
-		if err != nil {
-			return nil, fmt.Errorf("parse route gateway %q: %w", r.Gateway, err)
-		}
-		gw := gwAddr.String()
-
-		dst := ""
-		if strings.TrimSpace(r.Network) != "" {
-			p, err := netip.ParsePrefix(strings.TrimSpace(r.Network))
-			if err != nil {
-				return nil, fmt.Errorf("parse route network %q: %w", r.Network, err)
-			}
-			dst = p.String()
-		}
-
-		key := routeKey{iface: iface, dst: dst, gateway: gw, metric: r.Metric}
-		if _, ok := existing[key]; ok {
+		if len(desiredRoutes) == 0 {
 			continue
 		}
 
-		missing = append(missing, r)
+		missingInterfaces = append(missingInterfaces, iface)
+	}
+	sort.Strings(missingInterfaces)
+
+	for _, iface := range missingInterfaces {
+		lc := netcfg.NewLinkConfigV1Alpha1(iface)
+		lc.LinkRoutes = append([]netcfg.RouteConfig(nil), desiredByInterface[iface]...)
+		docs = append(docs, lc)
+		changed = true
 	}
 
-	return missing, nil
+	if !changed {
+		return machineConfig, false, nil
+	}
+
+	updatedCfg, err := container.New(docs...)
+	if err != nil {
+		return nil, false, fmt.Errorf("build updated machine config: %w", err)
+	}
+
+	updatedBytes, err := updatedCfg.Bytes()
+	if err != nil {
+		return nil, false, fmt.Errorf("encode updated machine config: %w", err)
+	}
+
+	if bytes.Equal(bytes.TrimSpace(updatedBytes), bytes.TrimSpace(machineConfig)) {
+		return machineConfig, false, nil
+	}
+
+	return updatedBytes, true, nil
 }
 
-type linkConfigPatchDoc struct {
-	Kind       string                 `yaml:"kind"`
-	APIVersion string                 `yaml:"apiVersion"`
-	Name       string                 `yaml:"name"`
-	Routes     []linkConfigPatchRoute `yaml:"routes,omitempty"`
+func sortRouteConfigs(routes []netcfg.RouteConfig) []netcfg.RouteConfig {
+	if len(routes) == 0 {
+		return nil
+	}
+
+	out := append([]netcfg.RouteConfig(nil), routes...)
+	sort.Slice(out, func(i, j int) bool {
+		lhs := routeConfigSignature(out[i])
+		rhs := routeConfigSignature(out[j])
+
+		if lhs.Destination != rhs.Destination {
+			return lhs.Destination < rhs.Destination
+		}
+		if lhs.Gateway != rhs.Gateway {
+			return lhs.Gateway < rhs.Gateway
+		}
+		if lhs.Source != rhs.Source {
+			return lhs.Source < rhs.Source
+		}
+		if lhs.Metric != rhs.Metric {
+			return lhs.Metric < rhs.Metric
+		}
+		if lhs.MTU != rhs.MTU {
+			return lhs.MTU < rhs.MTU
+		}
+
+		return lhs.Table < rhs.Table
+	})
+
+	return out
 }
 
-type linkConfigPatchRoute struct {
-	Destination string `yaml:"destination,omitempty"`
-	Gateway     string `yaml:"gateway,omitempty"`
-	Metric      uint32 `yaml:"metric,omitempty"`
+func sameRouteConfigs(a []netcfg.RouteConfig, b []netcfg.RouteConfig) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		if routeConfigSignature(a[i]) != routeConfigSignature(b[i]) {
+			return false
+		}
+	}
+
+	return true
 }
 
-func buildLinkConfigPatch(routes []Route) ([]byte, error) {
-	byIf := map[string][]Route{}
-	for i, r := range routes {
-		iface := strings.TrimSpace(r.Interface)
+func routeConfigSignature(route netcfg.RouteConfig) linkRouteSignature {
+	destination := ""
+	if route.RouteDestination.Prefix != (netip.Prefix{}) {
+		destination = route.RouteDestination.String()
+	}
+
+	gateway := ""
+	if route.RouteGateway.Addr != (netip.Addr{}) {
+		gateway = route.RouteGateway.String()
+	}
+
+	source := ""
+	if route.RouteSource.Addr != (netip.Addr{}) {
+		source = route.RouteSource.String()
+	}
+
+	return linkRouteSignature{
+		Destination: destination,
+		Gateway:     gateway,
+		Source:      source,
+		Metric:      route.RouteMetric,
+		MTU:         route.RouteMTU,
+		Table:       uint32(route.RouteTable),
+	}
+}
+
+func normalizeManagedInterfaces(managedInterfaces []string, desiredRoutes []Route) []string {
+	set := map[string]struct{}{}
+
+	for _, iface := range managedInterfaces {
+		iface = strings.TrimSpace(iface)
 		if iface == "" {
-			return nil, fmt.Errorf("routes[%d].interface is empty", i)
+			continue
 		}
-		if strings.TrimSpace(r.Gateway) == "" {
-			return nil, fmt.Errorf("routes[%d].gateway is empty (expected controller to derive it)", i)
-		}
-
-		byIf[iface] = append(byIf[iface], r)
+		set[iface] = struct{}{}
 	}
 
-	if len(byIf) == 0 {
-		return []byte(""), nil
+	for _, route := range desiredRoutes {
+		iface := strings.TrimSpace(route.Interface)
+		if iface == "" {
+			continue
+		}
+		set[iface] = struct{}{}
 	}
 
-	ifaces := make([]string, 0, len(byIf))
-	for k := range byIf {
-		ifaces = append(ifaces, k)
+	out := make([]string, 0, len(set))
+	for iface := range set {
+		out = append(out, iface)
 	}
-	sort.Strings(ifaces)
+	sort.Strings(out)
 
-	var out bytes.Buffer
-	for idx, iface := range ifaces {
-		doc := linkConfigPatchDoc{
-			Kind:       "LinkConfig",
-			APIVersion: "v1alpha1",
-			Name:       iface,
-			Routes:     make([]linkConfigPatchRoute, 0, len(byIf[iface])),
-		}
-
-		for _, r := range byIf[iface] {
-			doc.Routes = append(doc.Routes, linkConfigPatchRoute{
-				Destination: r.Network,
-				Gateway:     r.Gateway,
-				Metric:      r.Metric,
-			})
-		}
-
-		b, err := yaml.Marshal(doc)
-		if err != nil {
-			return nil, err
-		}
-		if idx > 0 {
-			out.WriteString("---\n")
-		}
-		out.Write(b)
-	}
-
-	return out.Bytes(), nil
+	return out
 }
 
 func expectedMachineConfigRouteSpec(r Route) (network.RouteSpecSpec, string, error) {

@@ -40,6 +40,11 @@ import (
 // +kubebuilder:rbac:groups=dockyards.io,resources=releases/status,verbs=patch
 // +kubebuilder:rbac:groups=image.toolkit.fluxcd.io,resources=imagepolicies,verbs=create;get;list;patch;watch
 // +kubebuilder:rbac:groups=image.toolkit.fluxcd.io,resources=imagerepositories,verbs=create;get;list;patch;watch
+// +kubebuilder:rbac:groups=talos.dockyards.io,resources=linkconfigs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch;patch;update
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 type DockyardsReleaseReconciler struct {
 	client.Client
