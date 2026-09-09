@@ -28,7 +28,7 @@ import (
 	talosroutes "github.com/sudoswedenab/dockyards-talos/internal/routes"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	handler "sigs.k8s.io/controller-runtime/pkg/handler"

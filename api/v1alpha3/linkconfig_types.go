@@ -87,7 +87,3 @@ func (in *LinkConfigSpec) DeepCopy() *LinkConfigSpec {
 
 	return out
 }
-
-func init() {
-	SchemeBuilder.Register(&LinkConfig{}, &LinkConfigList{})
-}

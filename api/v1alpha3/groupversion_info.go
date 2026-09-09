@@ -18,14 +18,22 @@ package v1alpha3
 // +groupName=talos.dockyards.io
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 const GroupName = "talos.dockyards.io"
 
 var (
 	SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: "v1alpha3"}
-	SchemeBuilder      = &scheme.Builder{GroupVersion: SchemeGroupVersion}
+	SchemeBuilder      = runtime.NewSchemeBuilder(addKnownTypes)
 	AddToScheme        = SchemeBuilder.AddToScheme
 )
+
+func addKnownTypes(scheme *runtime.Scheme) error {
+	scheme.AddKnownTypes(SchemeGroupVersion, &LinkConfig{}, &LinkConfigList{})
+	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
+
+	return nil
+}
