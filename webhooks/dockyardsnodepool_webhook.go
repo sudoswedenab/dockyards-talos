@@ -21,10 +21,8 @@ import (
 	dockyardsv1 "github.com/sudoswedenab/dockyards-backend/api/v1alpha3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -32,7 +30,7 @@ import (
 
 type DockyardsNodePool struct{}
 
-var _ webhook.CustomValidator = &DockyardsNodePool{}
+var _ admission.Validator[*dockyardsv1.NodePool] = &DockyardsNodePool{}
 
 var (
 	memoryLimit       = resource.MustParse("2Gi")
@@ -44,29 +42,21 @@ func (webhook *DockyardsNodePool) SetupWebhookWithManager(mgr ctrl.Manager) erro
 
 	_ = dockyardsv1.AddToScheme(scheme)
 
-	return ctrl.NewWebhookManagedBy(mgr).For(&dockyardsv1.NodePool{}).WithValidator(webhook).Complete()
+	return ctrl.NewWebhookManagedBy(mgr, &dockyardsv1.NodePool{}).
+		WithValidator(webhook).
+		Complete()
 }
 
-func (webhook *DockyardsNodePool) ValidateCreate(_ context.Context, obj runtime.Object) (admission.Warnings, error) {
-	dockyardsNodePool, ok := obj.(*dockyardsv1.NodePool)
-	if !ok {
-		return nil, nil
-	}
-
+func (webhook *DockyardsNodePool) ValidateCreate(_ context.Context, dockyardsNodePool *dockyardsv1.NodePool) (admission.Warnings, error) {
 	return nil, webhook.validate(dockyardsNodePool)
 }
 
-func (webhook *DockyardsNodePool) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
+func (webhook *DockyardsNodePool) ValidateDelete(_ context.Context, _ *dockyardsv1.NodePool) (admission.Warnings, error) {
 	return nil, nil
 }
 
-func (webhook *DockyardsNodePool) ValidateUpdate(_ context.Context, _, newObj runtime.Object) (admission.Warnings, error) {
-	dockyardsNodePool, ok := newObj.(*dockyardsv1.NodePool)
-	if !ok {
-		return nil, nil
-	}
-
-	return nil, webhook.validate(dockyardsNodePool)
+func (webhook *DockyardsNodePool) ValidateUpdate(_ context.Context, _ *dockyardsv1.NodePool, newObj *dockyardsv1.NodePool) (admission.Warnings, error) {
+	return nil, webhook.validate(newObj)
 }
 
 func (webhook *DockyardsNodePool) validate(dockyardsNodePool *dockyardsv1.NodePool) error {
