@@ -15,6 +15,22 @@
 name: lint
 on:
   pull_request:
+    paths:
+      - '**/*.go'
+      - go.mod
+      - go.sum
+      - .golangci.yaml
+      - Containerfile
+      - generate.go
+      - api/**
+      - cmd/**
+      - config/**
+      - controllers/**
+      - discovery-service/**
+      - dummy-discovery-client/**
+      - hack/**
+      - internal/**
+      - webhooks/**
 permissions:
   contents: read
 jobs:
