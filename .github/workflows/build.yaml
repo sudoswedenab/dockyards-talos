@@ -18,14 +18,30 @@ on:
     branches:
       - feat/*
       - fix/*
+      - main/*
+    paths:
+      - '**/*.go'
+      - go.mod
+      - go.sum
+      - .golangci.yaml
+      - Containerfile
+      - generate.go
+      - api/**
+      - cmd/**
+      - config/**
+      - controllers/**
+      - discovery-service/**
+      - dummy-discovery-client/**
+      - hack/**
+      - internal/**
+      - webhooks/**
+  workflow_dispatch:
 permissions:
+  id-token: write
   contents: read
 jobs:
-  build-push-ecr:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - id: prep
         run: |
