@@ -18,49 +18,68 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 const LinkConfigKind = "LinkConfig"
 
+// LinkConfigNode identifies a remote endpoint used by link configuration workflows.
 type LinkConfigNode struct {
+	// Address is the IP address or hostname of the remote endpoint.
 	Address string `json:"address"`
-	Port    int32  `json:"port,omitempty"`
+	// Port is the endpoint port. When omitted, the consumer default is used.
+	Port int32 `json:"port,omitempty"`
 }
 
+// LinkConfigRoute defines a static route that Talos should configure on a node.
 type LinkConfigRoute struct {
+	// Network is the destination CIDR for the static route.
 	Network string `json:"network"`
 
+	// Interface is the network interface used to reach the destination network.
 	Interface string `json:"interface"`
 
+	// Gateway is the next-hop gateway for the route.
 	Gateway string `json:"gateway,omitempty"`
 
+	// Metric is the route priority. Lower values are preferred.
 	Metric uint32 `json:"metric,omitempty"`
 }
 
+// LinkConfigDefaultRoute defines the default route Talos should configure.
 type LinkConfigDefaultRoute struct {
+	// Interface is the network interface used for the default route.
 	Interface string `json:"interface"`
 
+	// Gateway is the next-hop gateway for the default route.
 	Gateway string `json:"gateway,omitempty"`
 
+	// Metric is the route priority. Lower values are preferred.
 	Metric uint32 `json:"metric,omitempty"`
 }
 
+// LinkConfigSpec defines desired routing configuration consumed by Talos integration.
 type LinkConfigSpec struct {
+	// StaticRoutes lists destination-specific static routes to apply.
 	StaticRoutes []LinkConfigRoute `json:"staticRoutes,omitempty"`
 
+	// DefaultRoute defines the default route configuration.
 	DefaultRoute *LinkConfigDefaultRoute `json:"defaultRoute,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// LinkConfig stores static and default route settings applied to Talos-managed nodes.
 type LinkConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// Spec defines desired routing configuration for this resource.
 	Spec LinkConfigSpec `json:"spec,omitempty"`
 }
 
 // +kubebuilder:object:root=true
+// LinkConfigList contains a list of LinkConfig resources.
 type LinkConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 
+	// Items contains the list of LinkConfig resources.
 	Items []LinkConfig `json:"items,omitempty"`
 }
 
