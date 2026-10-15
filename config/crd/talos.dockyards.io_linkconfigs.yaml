@@ -35,6 +35,8 @@ spec:
     name: v1alpha3
     schema:
       openAPIV3Schema:
+        description: LinkConfig stores static and default route settings applied to
+          Talos-managed nodes.
         properties:
           apiVersion:
             description: |-
@@ -54,30 +56,47 @@ spec:
           metadata:
             type: object
           spec:
+            description: Spec defines desired routing configuration for this resource.
             properties:
               defaultRoute:
+                description: DefaultRoute defines the default route configuration.
                 properties:
                   gateway:
+                    description: Gateway is the next-hop gateway for the default route.
                     type: string
                   interface:
+                    description: Interface is the network interface used for the default
+                      route.
                     type: string
                   metric:
+                    description: Metric is the route priority. Lower values are preferred.
                     format: int32
                     type: integer
                 required:
                 - interface
                 type: object
               staticRoutes:
+                description: StaticRoutes lists destination-specific static routes
+                  to apply.
                 items:
+                  description: LinkConfigRoute defines a static route that Talos should
+                    configure on a node.
                   properties:
                     gateway:
+                      description: Gateway is the next-hop gateway for the route.
                       type: string
                     interface:
+                      description: Interface is the network interface used to reach
+                        the destination network.
                       type: string
                     metric:
+                      description: Metric is the route priority. Lower values are
+                        preferred.
                       format: int32
                       type: integer
                     network:
+                      description: Network is the destination CIDR for the static
+                        route.
                       type: string
                   required:
                   - interface
