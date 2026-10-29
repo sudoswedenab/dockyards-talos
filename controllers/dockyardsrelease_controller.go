@@ -21,7 +21,7 @@ import (
 	"time"
 
 	semverv3 "github.com/Masterminds/semver/v3"
-	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
+	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	"github.com/fluxcd/pkg/apis/meta"
 	"github.com/fluxcd/pkg/runtime/patch"
 	"github.com/siderolabs/talos/pkg/machinery/platforms"
