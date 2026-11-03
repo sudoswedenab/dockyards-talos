@@ -26,6 +26,7 @@ import (
 	"github.com/fluxcd/pkg/runtime/patch"
 	"github.com/siderolabs/talos/pkg/machinery/platforms"
 	dockyardsv1 "github.com/sudoswedenab/dockyards-backend/api/v1alpha3"
+	kerrorsapi "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -194,8 +195,20 @@ func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context
 		},
 	}
 
-	_, err := controllerutil.CreateOrPatch(ctx, r.Client, &imageRepository, func() error {
-		imageRepository.Spec.Image = "ghcr.io/siderolabs/installer"
+	installerImage := TalosInstallerImageLegacy
+
+	err := r.Get(ctx, client.ObjectKeyFromObject(&imageRepository), &imageRepository)
+	if err == nil {
+		switch imageRepository.Spec.Image {
+		case TalosInstallerImageLegacy, TalosInstallerImageBase:
+			installerImage = imageRepository.Spec.Image
+		}
+	} else if !kerrorsapi.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+
+	_, err = controllerutil.CreateOrPatch(ctx, r.Client, &imageRepository, func() error {
+		imageRepository.Spec.Image = installerImage
 
 		imageRepository.Spec.Interval = metav1.Duration{
 			Duration: time.Hour,
@@ -238,7 +251,22 @@ func (r *DockyardsReleaseReconciler) reconcileTalosInstaller(ctx context.Context
 	}
 
 	if imagePolicy.Status.LatestRef == nil {
-		logger.Info("ignoring talos installer image policy without latest reference")
+		if installerImage == TalosInstallerImageLegacy {
+			logger.Info("talos installer image policy has no latest reference, switching to installer-base", "image", installerImage, "fallbackImage", TalosInstallerImageBase)
+
+			_, err = controllerutil.CreateOrPatch(ctx, r.Client, &imageRepository, func() error {
+				imageRepository.Spec.Image = TalosInstallerImageBase
+
+				return nil
+			})
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+
+		logger.Info("ignoring talos installer image policy without latest reference", "image", installerImage)
 
 		return ctrl.Result{}, nil
 	}
