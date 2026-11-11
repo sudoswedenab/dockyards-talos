@@ -17,13 +17,15 @@ package controllers
 import (
 	"context"
 	"testing"
+	"time"
 
-	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1beta2"
+	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1"
 	"github.com/google/go-cmp/cmp"
 	dockyardsv1 "github.com/sudoswedenab/dockyards-backend/api/v1alpha3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -173,6 +175,72 @@ func TestReleaseReconciler_TalosInstaller(t *testing.T) {
 
 		if !cmp.Equal(release, expected) {
 			t.Errorf("diff: %s", cmp.Diff(expected, release))
+		}
+	})
+
+	t.Run("fallback to installer-base when no latest reference", func(t *testing.T) {
+		release := dockyardsv1.Release{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "openstack",
+				Namespace: "testing",
+			},
+			Spec: dockyardsv1.ReleaseSpec{
+				Ranges: []string{
+					"v1.14.x",
+				},
+				Type: dockyardsv1.ReleaseTypeTalosInstaller,
+			},
+		}
+
+		imagePolicy := imagev1.ImagePolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "openstack",
+				Namespace: "testing",
+			},
+			Spec: imagev1.ImagePolicySpec{
+				Policy: imagev1.ImagePolicyChoice{
+					SemVer: &imagev1.SemVerPolicy{
+						Range: "v1.14.x",
+					},
+				},
+			},
+		}
+
+		scheme := runtime.NewScheme()
+
+		_ = dockyardsv1.AddToScheme(scheme)
+		_ = imagev1.AddToScheme(scheme)
+
+		c := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithObjects(&imagePolicy).
+			Build()
+
+		r := DockyardsReleaseReconciler{
+			Client:           c,
+			ImageFactoryHost: "localhost",
+		}
+
+		ctx := context.Background()
+
+		result, err := r.reconcileTalosInstaller(ctx, &release)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if result.RequeueAfter != 15*time.Second {
+			t.Fatalf("expected requeue after 15s, got %s", result.RequeueAfter)
+		}
+
+		var imageRepository imagev1.ImageRepository
+
+		err = c.Get(ctx, client.ObjectKey{Name: "openstack", Namespace: "testing"}, &imageRepository)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if imageRepository.Spec.Image != TalosInstallerImageBase {
+			t.Fatalf("expected image repository to use %s, got %s", TalosInstallerImageBase, imageRepository.Spec.Image)
 		}
 	})
 }
