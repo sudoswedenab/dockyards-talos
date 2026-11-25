@@ -107,6 +107,14 @@ When gateway is not explicitly provided, the controller:
 
 Optional webhook (`webhooks/dockyardsnodepool_webhook.go`) validates NodePool memory requirements.
 
+- NodeClass `status.resources.memory`, when present, is authoritative per-node capacity and must be at least `2Gi`. Explicitly specified NodePool memory must match that capacity.
+- Without NodeClass memory capacity, NodePools must specify at least `2Gi` in `spec.resources.memory`, including when a NodeClass supplies only scheduling settings.
+- Exception: a NodeClass with `spec.openstack` is provider-sized. Missing `status.resources.memory` is rejected rather than falling back to requests. Wait for the OpenStack controller to populate capacity before retrying. Talos does not convert raw OpenStack flavor metadata.
+- NodeClass references default to the NodePool namespace unless an explicit namespace is provided. The webhook reads NodeClasses directly from the API server and requires `get` permission.
+- These checks apply to both NodePool creation and updates. Validation never copies discovered resources into the NodePool spec.
+
+For rollout, install the backend NodeClass CRD supporting `status.resources`, then update `dockyards-openstack-v2` and verify existing NodeClasses have capacity populated, before deploying this webhook and its NodeClass read permissions. The consumer reads unstructured objects while the new backend API module is unpublished, so no local Go module replacement is required.
+
 ## Manifests
 
 Main manifest directories:
