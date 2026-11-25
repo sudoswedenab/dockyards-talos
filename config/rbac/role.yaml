@@ -59,6 +59,12 @@ rules:
 - apiGroups:
   - dockyards.io
   resources:
+  - nodeclasses
+  verbs:
+  - get
+- apiGroups:
+  - dockyards.io
+  resources:
   - releases
   verbs:
   - get
