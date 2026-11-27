@@ -6,6 +6,7 @@
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
+      "exclude-paths": ["pkg/kernelmodules"],
       "changelog-types": [
         {
           "type": "feat",
@@ -59,6 +60,17 @@
           "hidden": true
         }
       ]
+    },
+    "pkg/kernelmodules": {
+      "release-type": "go",
+      "component": "pkg/kernelmodules",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "tag-separator": "/",
+      "changelog-path": "CHANGELOG.md",
+      "initial-version": "0.1.0",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true
     }
   }
 }
