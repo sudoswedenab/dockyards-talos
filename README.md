@@ -126,6 +126,12 @@ Main manifest directories:
 
 Top-level kustomization artifact generation is driven by `hack/kustomization.cue` and includes base, CRD, RBAC, and webhook resources.
 
+## Reusable Go modules
+
+[`pkg/kernelmodules`](pkg/kernelmodules) is an independent Go module for safely
+configuring and loading caller-selected kernel modules on Talos 1.14+ nodes.
+It has its own dependencies and tests; see its README for usage and publishing.
+
 ## Development
 
 ```bash
